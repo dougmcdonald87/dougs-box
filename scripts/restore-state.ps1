@@ -58,7 +58,7 @@ if ([string]::IsNullOrWhiteSpace($snapshotId)) {
 $cfgFile = Join-Path $PSScriptRoot '..\config\devbox.json'
 $cfg = if (Test-Path -LiteralPath $cfgFile) { Get-Content -LiteralPath $cfgFile -Raw | ConvertFrom-Json } else { $null }
 $limitGiB = if ($cfg -and $cfg.auto_restore_max_gib) { [double]$cfg.auto_restore_max_gib } else { 3.0 }
-$statsRaw = (& $restic --repo $repo stats $snapshotId --mode archive-size --json 2>&1 | Out-String)
+$statsRaw = (& $restic --repo $repo stats $snapshotId --mode restore-size --json 2>&1 | Out-String)
 if ($LASTEXITCODE -ne 0) {
     Stop-DevBox 'Could not measure snapshot size. Refusing an unbounded automatic restore.'
 }
