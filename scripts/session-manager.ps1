@@ -5,6 +5,7 @@ param([switch]$JobStart, [switch]$SmokeOnly)
 Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot 'common.ps1')
 . (Join-Path $PSScriptRoot 'control-queue.ps1')
+. (Join-Path $PSScriptRoot 'invoke-save-isolated.ps1')
 
 if (-not $JobStart) {
     Write-Output 'Session manager requires -JobStart.'
@@ -37,8 +38,8 @@ function Invoke-VerifiedSave {
     param([string]$Reason)
     $saveScript = Join-Path $PSScriptRoot 'save-state.ps1'
     Write-DevBox INFO "Starting $Reason save."
-    & $saveScript
-    if ($LASTEXITCODE -ne 0) {
+    $saved = Invoke-DevBoxBackupIsolated -SaveScript $saveScript
+    if (-not $saved) {
         Write-DevBox WARN "$Reason backup failed. Check the job log and do not assume work was saved."
         return $false
     }
