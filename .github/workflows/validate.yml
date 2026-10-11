@@ -54,6 +54,10 @@ jobs:
         shell: pwsh
         run: ./tests/retry-strictmode.tests.ps1
 
+      - name: Adversarial duplicate-start and queued-run checks
+        shell: bash
+        run: python3 tests/guard-one-session.tests.py
+
       - name: Adversarial user-stop control regression
         shell: pwsh
         run: ./tests/control-queue.tests.ps1
