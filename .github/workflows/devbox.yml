@@ -95,18 +95,24 @@ jobs:
         env:
           RESTIC_PASSWORD: ${{ secrets.RESTIC_PASSWORD }}
           DEVBOX_STORAGE_TAILSCALE_IP: '100.70.202.110'
+          RESTIC_REST_USERNAME: devbox
+          RESTIC_REST_PASSWORD: ${{ secrets.DEVBOX_STORAGE_PASSWORD }}
         run: ./scripts/connect-persistence.ps1
 
       - name: Restore state (HOT first, Git canonical, small overlay)
         shell: pwsh
         env:
           RESTIC_PASSWORD: ${{ secrets.RESTIC_PASSWORD }}
+          RESTIC_REST_USERNAME: devbox
+          RESTIC_REST_PASSWORD: ${{ secrets.DEVBOX_STORAGE_PASSWORD }}
         run: ./scripts/restore-state.ps1
 
       - name: First canary + backup proof
         shell: pwsh
         env:
           RESTIC_PASSWORD: ${{ secrets.RESTIC_PASSWORD }}
+          RESTIC_REST_USERNAME: devbox
+          RESTIC_REST_PASSWORD: ${{ secrets.DEVBOX_STORAGE_PASSWORD }}
         run: ./scripts/save-state.ps1 -First
 
       # The session manager is the LAST step. It first writes a heartbeat,
@@ -116,4 +122,6 @@ jobs:
         shell: pwsh
         env:
           RESTIC_PASSWORD: ${{ secrets.RESTIC_PASSWORD }}
+          RESTIC_REST_USERNAME: devbox
+          RESTIC_REST_PASSWORD: ${{ secrets.DEVBOX_STORAGE_PASSWORD }}
         run: ./scripts/session-manager.ps1 -JobStart
