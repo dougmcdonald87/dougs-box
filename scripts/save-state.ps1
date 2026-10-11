@@ -44,6 +44,21 @@ $canaryText = "DEVBOX-CANARY $([DateTime]::UtcNow.ToString('o')) run $env:GITHUB
 Set-Content -LiteralPath $canaryFile -Value $canaryText -Encoding utf8
 $expectedHash = (Get-FileHash -LiteralPath $canaryFile -Algorithm SHA256).Hash
 
+# OpenCode v2 keeps conversations in a SQLite DB OUTSIDE Projects/Workspace.
+# A raw copy of a live WAL-backed DB can be inconsistent. Python's sqlite3
+# backup() produces a transaction-consistent copy while the agent is running.
+# Do not include auth.json, browser cookies or provider credentials.
+$historyDir = New-DevboxDirectorySafe (Join-Path $env:DEVBOX_WSROOT 'PersistentData\OpenCodeHistory')
+$historyFile = Join-Path $historyDir 'opencode.db'
+$activeHistory = Join-Path $env:USERPROFILE '.local\share\opencode\opencode.db'
+if (Test-Path -LiteralPath $activeHistory -PathType Leaf) {
+    $sqliteTool = Join-Path $PSScriptRoot 'snapshot-opencode-db.py'
+    & python $sqliteTool $activeHistory $historyFile
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $historyFile -PathType Leaf)) {
+        Stop-DevBox 'Consistent OpenCode history snapshot failed; refusing to mark backup successful.'
+    }
+}
+
 # Explicitly include the canary. The original script created it but never
 # added its directory to the backup command.
 # The actual work must be saved. Canary-only snapshots are NOT persistence.
@@ -51,8 +66,12 @@ $expectedHash = (Get-FileHash -LiteralPath $canaryFile -Algorithm SHA256).Hash
 $projectsDir = New-DevboxDirectorySafe (Join-Path $env:DEVBOX_WSROOT 'Projects')
 $workspaceDir = New-DevboxDirectorySafe (Join-Path $env:DEVBOX_WSROOT 'Workspace')
 $roots = @($canaryDir, $projectsDir, $workspaceDir)
+if (Test-Path -LiteralPath $historyFile -PathType Leaf) { $roots += $historyDir }
 $configFile = Join-Path $PSScriptRoot '..\config\devbox.json'
 $config = if (Test-Path -LiteralPath $configFile) { Get-Content -LiteralPath $configFile -Raw | ConvertFrom-Json } else { $null }
+# Legacy OpenCode may use a project session directory rather than SQLite.
+$legacyHistory = Join-Path $env:USERPROFILE '.local\share\opencode\project'
+if (Test-Path -LiteralPath $legacyHistory -PathType Container) { $roots += $legacyHistory }
 $hot = if ($config -and $config.hot_paths) { @($config.hot_paths) } else {
     @("$env:USERPROFILE\.config\opencode",
       "$env:USERPROFILE\AGENTS.md",
