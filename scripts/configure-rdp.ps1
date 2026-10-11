@@ -40,7 +40,7 @@ if (-not (Get-LocalGroupMember -Group 'Administrators' -Member $acct -ErrorActio
 $tsKey = 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server'
 Set-ItemProperty -Path $tsKey -Name fDenyTSConnections -Value 0 -Type DWord
 $rdpWin = 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp'
-Set-ItemProperty -Path $rdpWin -Name UserAuthentication -Value 2 -Type DWord   # NLA required
+Set-ItemProperty -Path $rdpWin -Name UserAuthentication -Value 1 -Type DWord   # Microsoft: 1 requires NLA; 0 does not
 Set-ItemProperty -Path $rdpWin -Name SecurityLayer   -Value 1 -Type DWord
 
 # firewall: allow RDP through Windows locally-inbound only when the connection
