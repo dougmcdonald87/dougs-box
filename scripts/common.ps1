@@ -90,7 +90,8 @@ function Test-DevBoxRepoDestination {
     param([Parameter(Mandatory)][string]$Repo)
     if ($Repo -ceq 'rest:http://100.70.202.110:8000/devbox/') { return $true }
     if ($env:DEVBOX_ISOLATED_TEST -eq '1' -and $env:GITHUB_ACTIONS -eq 'true' -and $env:RUNNER_TEMP) {
-        $root = [System.IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\\') + '\\'
+        $sep = [System.IO.Path]::DirectorySeparatorChar
+        $root = [System.IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd($sep) + $sep
         $full = [System.IO.Path]::GetFullPath($Repo)
         return $full.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase)
     }
