@@ -16,6 +16,7 @@ Rules:
 |---|---|---|---|---|
 | `C:\Users\dougm\repos\devbox\` | Build staging root for the future DevBox repo (pre-git) | - | 2026-10-10 | Assess after build |
 | `C:\Users\dougm\repos\devbox\BUILD-LOCAL-INVENTORY.md` | This ledger | - | 2026-10-10 | Keep |
+| `C:\Users\dougm\repos\devbox\.git\` | git repo, root commit `175d03c` (41 files, 2026-10-11); remote dougmcdonald87/dougs-box (public, "Doug's box"), pushed + verified | Keep |
 
 ## Local-tooling probe result (no files created; facts for the build)
 
