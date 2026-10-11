@@ -70,6 +70,10 @@ jobs:
         shell: bash
         run: python3 tests/opencode-history.tests.py
 
+      - name: Fatal Restic response must not terminate desktop or permit unsafe stop
+        shell: pwsh
+        run: ./tests/backup-failure-isolation.tests.ps1
+
       - name: Adversarial user-stop control regression
         shell: pwsh
         run: ./tests/control-queue.tests.ps1
