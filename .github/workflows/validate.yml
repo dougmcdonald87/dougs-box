@@ -89,6 +89,8 @@ jobs:
 
       - name: Install actual OpenCode on clean Windows runner
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
           $env:DEVBOX_WSROOT = Join-Path $env:RUNNER_TEMP 'DevBox-QA'
