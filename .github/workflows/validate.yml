@@ -101,3 +101,45 @@ jobs:
           & $exe.FullName --version
           if ($LASTEXITCODE -ne 0) { throw "Installed OpenCode failed on Windows: $LASTEXITCODE" }
           Write-Output 'WINDOWS OPENCODE INSTALL SMOKE: PASS'
+
+  windows-devbox-stages:
+    name: Windows stage smoke - Restic, RDP and firewall
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Install and verify real Restic
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:DEVBOX_WSROOT = Join-Path $env:RUNNER_TEMP 'DevBox-QA'
+          $env:DEVBOX_CONTROL_PATH = Join-Path $env:DEVBOX_WSROOT 'Control'
+          New-Item -ItemType Directory -Path $env:DEVBOX_CONTROL_PATH -Force | Out-Null
+          $path = Join-Path $env:DEVBOX_WSROOT 'Tools\restic'
+          ./scripts/install-restic.ps1 -ToolsRoot $path
+          & (Join-Path $path 'restic.exe') version
+          if ($LASTEXITCODE -ne 0) { throw 'Installed restic failed on Windows.' }
+          "DEVBOX_WSROOT=$env:DEVBOX_WSROOT" >> $env:GITHUB_ENV
+          "DEVBOX_CONTROL_PATH=$env:DEVBOX_CONTROL_PATH" >> $env:GITHUB_ENV
+          Write-Output 'WINDOWS RESTIC INSTALL: PASS'
+      - name: Configure real RDP on disposable Windows runner
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $password = ConvertTo-SecureString -String 'RunOnly!Dbx2026#Test' -AsPlainText -Force
+          ./scripts/configure-rdp.ps1 -Password $password
+          $nla = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp').UserAuthentication
+          if ($nla -ne 1) { throw 'RDP NLA not enabled.' }
+          $listener = @(Get-NetTCPConnection -LocalPort 3389 -State Listen -ErrorAction SilentlyContinue)
+          if ($listener.Count -eq 0) { throw 'No TCP 3389 listener.' }
+          foreach ($rule in @(Get-NetFirewallRule -DisplayGroup 'Remote Desktop')) {
+            if ($rule.Enabled -ne 'True') { continue }
+            $filter = $rule | Get-NetFirewallAddressFilter
+            if ($filter.RemoteAddress -notcontains '100.64.0.0/10') {
+              throw 'Enabled RDP firewall rule is not restricted to Tailscale IP space.'
+            }
+          }
+          Write-Output 'WINDOWS RDP CONFIGURATION: PASS'
