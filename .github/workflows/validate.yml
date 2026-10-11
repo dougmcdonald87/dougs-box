@@ -52,18 +52,23 @@ jobs:
 
       - name: Append-only law + data-loss audit
         # Phase 41: destructive commands must appear in ZERO code files.
-        # Scope = code (.ps1/.yml/.json/.psd1/.psm1). Docs (.md) may state the law,
-        # which is expected and safe; the grep deliberately excludes prose.
+        # Scope = code (.ps1/.psd1/.json). The two enforcement artifacts are
+        # deliberately excluded from this grep because their whole purpose is
+        # to name the forbidden vocabulary in patterns:
+        #   .github/workflows/validate.yml (this file's own grep pattern)
+        #   tests/devbox.tests.ps1         (unit-mirror of the same audit)
+        # Docs (.md) may state the law; the grep scans code only.
         shell: bash
         run: |
           set -euo pipefail
           if grep -rniE '(^|[^a-z])(forget|prune)([^a-z]|$)' \
-              --include='*.ps1' --include='*.yml' --include='*.json' . ; then
+              --include='*.ps1' --include='*.yml' --include='*.json' \
+              --exclude='validate.yml' --exclude='devbox.tests.ps1' . ; then
             echo "AUDIT FAIL: destructive-restore vocabulary found in code above."
             exit 1
           fi
-          if grep -rn -- '--delete' --include='*.ps1' . ; then
+          if grep -rn -- '--delete' --include='*.ps1' --exclude='devbox.tests.ps1' . ; then
             echo "AUDIT FAIL: destructive restore --delete in a script."
             exit 1
           fi
-          echo "AUDIT OK: no destructive-restore vocabulary in any code file."
+          echo "AUDIT OK: destructive-restore vocabulary absent from scanned code."
