@@ -109,17 +109,11 @@ jobs:
           RESTIC_PASSWORD: ${{ secrets.RESTIC_PASSWORD }}
         run: ./scripts/save-state.ps1 -First
 
-      - name: Start session manager (heartbeat, deadline, backup scheduler)
+      # The session manager is the LAST step. It first writes a heartbeat,
+      # runs health checks, prints READY, then blocks until the session ends.
+      # A background worker as an earlier Actions step would not keep the VM alive.
+      - name: DevBox session (health, READY, periodic saves, graceful end)
         shell: pwsh
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/session-manager.ps1 -JobStart
-
-      - name: Health check
-        shell: pwsh
-        run: ./scripts/health-check.ps1
-
-      - name: DEVBOX READY summary
-        if: success()
-        shell: pwsh
-        run: |
-          & ./scripts/health-check.ps1 -SummaryOnly
-          Write-Output "Open Tailscale and select the ephemeral DevBox node (devbox-${{ github.run_id }}). Sign in with runneradmin."
+        env:
+          RESTIC_PASSWORD: ${{ secrets.RESTIC_PASSWORD }}
+        run: ./scripts/session-manager.ps1 -JobStart
