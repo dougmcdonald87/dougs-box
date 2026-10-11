@@ -46,12 +46,23 @@ Write-DevBox OK "rest-server reachable at ${storageIp}:8000"
 #      Download once into the shared Tools dir; sha256 recorded for the log.
 $resticRoot = New-DevboxDirectorySafe (Join-Path $env:DEVBOX_WSROOT 'Tools\restic')
 $resticExe = Join-Path $resticRoot 'restic.exe'
-$resticVersion = '0.18.4'   # candidate version; Phase 1 live research duty on first real run
-if (-not (Test-Path $resticExe)) {
-    $zip = Join-Path $resticRoot 'restic.zip'
+# Stable upstream release and independently published zip SHA-256.
+# Actual archive executable is VERSIONED, e.g. restic_0.19.1_windows_amd64.exe.
+$resticVersion = '0.19.1'
+$expectedZipSha256 = 'da948ad707ed690426473aaba2046cd61f8f90f6f0e7dab6be0d5796531de67d'
+if (-not (Test-Path -LiteralPath $resticExe -PathType Leaf)) {
+    $zip = Join-Path $resticRoot "restic_$($resticVersion)_windows_amd64.zip"
+    $unpack = New-DevboxDirectorySafe (Join-Path $resticRoot 'unpacked')
     Invoke-DevboxRetry -Script {
-        Invoke-WebRequest -Uri "https://github.com/restic/restic/releases/download/v$resticVersion/restic_${resticVersion}_windows_amd64.zip" -OutFile $zip
-        Expand-Archive -LiteralPath $zip -DestinationPath $resticRoot -Force
+        Invoke-WebRequest -Uri "https://github.com/restic/restic/releases/download/v$resticVersion/restic_$($resticVersion)_windows_amd64.zip" -OutFile $zip -ErrorAction Stop
+        $actualHash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($actualHash -ne $expectedZipSha256) { throw 'Official restic ZIP digest mismatch; installation refused.' }
+        Expand-Archive -LiteralPath $zip -DestinationPath $unpack -Force -ErrorAction Stop
+        $versionedExe = Get-ChildItem -LiteralPath $unpack -Recurse -File |
+            Where-Object { $_.Name -eq "restic_$($resticVersion)_windows_amd64.exe" } |
+            Select-Object -First 1
+        if (-not $versionedExe) { throw 'Signed release archive did not contain the expected versioned executable.' }
+        Copy-Item -LiteralPath $versionedExe.FullName -Destination $resticExe -Force -ErrorAction Stop
     } -Attempts 3
 }
 if (-not (Test-Path $resticExe)) { Stop-DevBox "restic.exe missing after download. Next action: confirm asset name on restic releases." }
