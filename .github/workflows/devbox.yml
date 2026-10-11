@@ -92,6 +92,8 @@ jobs:
 
       - name: Install OpenCode (standalone Windows x64)
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: ./scripts/install-opencode.ps1 -ToolsRoot "${{ steps.storage.outputs.fastRoot }}\DevBox\Tools"
 
       - name: Configure RDP (runneradmin preferred, NLA kept)
