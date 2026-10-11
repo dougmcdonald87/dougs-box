@@ -32,8 +32,12 @@ if ($adminUser) {
 
 # --- password + group membership
 Set-LocalUser -Name $acct -Password $Password -PasswordNeverExpires -AccountNeverExpires
-if (-not (Get-LocalGroupMember -Group 'Administrators' -Member $acct -ErrorAction SilentlyContinue)) {
-    Add-LocalGroupMember -Group 'Administrators' -Member $acct
+# Get-LocalGroupMember has no -Member parameter. Enumerate the group
+# members explicitly and compare SIDs, not localized name strings.
+$acctSid = (Get-LocalUser -Name $acct).SID.Value
+$adminMembers = @(Get-LocalGroupMember -Group 'Administrators' -ErrorAction Stop)
+if (-not @($adminMembers | Where-Object { $_.SID.Value -eq $acctSid }).Count) {
+    Add-LocalGroupMember -Group 'Administrators' -Member $acct -ErrorAction Stop
 }
 
 # --- enable Remote Desktop (built-in), keep NLA ON, no RDS roles anywhere
