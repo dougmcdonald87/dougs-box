@@ -43,3 +43,28 @@ No changes to user devices, Tailscale policy, RustDesk, OpenCode servers, Llama 
 - Official policy syntax and access tests: https://tailscale.com/docs/reference/syntax/policy-file
 - Official Tailscale grants: https://tailscale.com/docs/reference/syntax/grants
 - Source branch: https://github.com/dougmcdonald87/dougs-box/tree/safety/devbox-non-disruptive-fixes-20261011
+
+
+## Critical feasibility challenge — FREE Windows runner workspace
+
+**Finding:** official GitHub runner documentation lists standard public Windows x64 runner as
+**4 vCPU, 16 GB RAM, 14 GB SSD**. The DevBox design requires a 100 GiB *local fixed writable workspace*.
+
+- Narrow claim challenged: "The free standard public Windows runner reliably offers >=100 GiB locally usable fixed storage."
+- Strongest source against claim: https://docs.github.com/en/actions/reference/runners/github-hosted-runners (Windows row, 14 GB SSD).
+- Secondary evidence: GitHub removed accessible D: for public windows-2025 in July 2025:
+  https://github.com/actions/runner-images/issues/12416
+- Smallest falsifier/competitor: a real \`probe-runners.yml\` manual run could reveal a qualifying accessible >100 GiB fixed volume despite the current published standard specification.
+- Status: **Official published specifications contradict the design; no live probe has been run by this assistant.**
+- Risk implication: do NOT treat "100+ GiB free standard runner" as a known fact and do NOT spend money on larger runner upgrades.
+- Safe owner action: GitHub > dougmcdonald87/dougs-box > Actions > Probe runners > Run workflow on main, read reported disk table. The workflow only does runner introspection and reads repository code; it does NOT request Tailscale secrets or contact Lenovo/HP. The publicly hosted probe itself is subject to GitHub's normal policies and availability.
+- Next decision: If no >=100 GiB fixed writable volume qualifies, **stop the local-workspace design** and revisit workspace/storage requirements; do not claim zero-cost 100 GiB is solved.
+
+## Additional source-level repairs on the isolated branch
+
+- \`scripts/configure-rdp.ps1\` and \`scripts/health-check.ps1\`: set/check \`UserAuthentication=1\`, the documented Microsoft value for required NLA. Source: https://learn.microsoft.com/en-us/windows-hardware/customize/desktop/unattend/microsoft-windows-terminalservices-rdp-winstationextensions-userauthentication
+- \`scripts/save-state.ps1\`: actual \`restic backup\` command, require \`summary.snapshot_id\`, include the canary directory, list the snapshot, restore and checksum the canary. Upstream docs: https://restic.readthedocs.io/en/stable/075_scripting.html
+- \`scripts/restore-state.ps1\`: first-run uninitialized repository code 10 is recognized rather than treated as a fatal restoration failure. **Existing-snapshot restore path remains untested and still needs review**.
+- \`scripts/session-manager.ps1\` and \`.github/workflows/devbox.yml\`: session manager is now the final, blocking workflow step; writes heartbeat and performs health check before reporting READY; periodic saves get the environment-only Restic password.
+
+**Proof status:** All the above modifications are committed in the *safety branch*, but source code was not executed under GitHub/PowerShell/Restic/Tailscale. Static checks and source review are not equivalent to a passing live backup, RDP, or working environment. Additional latent bugs may exist. No tailnet policy or laptop services modified.
