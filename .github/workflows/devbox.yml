@@ -20,6 +20,9 @@ concurrency:
 env:
   JOB_TIMEOUT_MINUTES: 350
   JOB_HARD_LIMIT_MINUTES: 360
+  # This is the existing public Tailscale OIDC Client ID (not a secret).
+  # Generated audience is api.tailscale.com/<full Client ID>.
+  DEVBOX_OIDC_CLIENT_ID: 'Tf3m25iN2121CNTRL-k1fB6QfG2V11CNTRL'
 
 jobs:
   preflight:
@@ -69,15 +72,15 @@ jobs:
       - name: Check GitHub OIDC claims before Tailscale
         shell: pwsh
         env:
-          TS_OAUTH_CLIENT_ID: ${{ secrets.TS_OAUTH_CLIENT_ID }}
-          TS_AUDIENCE: ${{ secrets.TS_AUDIENCE }}
+          TS_OAUTH_CLIENT_ID: ${{ env.DEVBOX_OIDC_CLIENT_ID }}
+          TS_AUDIENCE: ${{ format('api.tailscale.com/{0}', env.DEVBOX_OIDC_CLIENT_ID) }}
         run: ./scripts/check-tailscale-oidc.ps1
 
       - name: Join tailnet (WIF/OIDC, ephemeral, tagged)
         uses: tailscale/github-action@d1b6cd204f8dceda5b3eaad7f1f767be390056cd # v4.2.0
         with:
-          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
-          audience: ${{ secrets.TS_AUDIENCE }}
+          oauth-client-id: ${{ env.DEVBOX_OIDC_CLIENT_ID }}
+          audience: ${{ format('api.tailscale.com/{0}', env.DEVBOX_OIDC_CLIENT_ID) }}
           tags: tag:github-devbox
           version: latest
           hostname: devbox-${{ github.run_id }}
