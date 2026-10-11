@@ -83,6 +83,20 @@ function Invoke-DevboxRetry {
     Stop-DevBox "all $Attempts attempts exhausted"
 }
 
+# Enforce that production restic operations can target ONLY the dedicated
+# Lenovo DevBox repository. Test mode is permitted exclusively on disposable
+# GitHub CI runners in the runner's own temporary directory.
+function Test-DevBoxRepoDestination {
+    param([Parameter(Mandatory)][string]$Repo)
+    if ($Repo -ceq 'rest:http://100.70.202.110:8000/devbox/') { return $true }
+    if ($env:DEVBOX_ISOLATED_TEST -eq '1' -and $env:GITHUB_ACTIONS -eq 'true' -and $env:RUNNER_TEMP) {
+        $root = [System.IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\\') + '\\'
+        $full = [System.IO.Path]::GetFullPath($Repo)
+        return $full.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase)
+    }
+    return $false
+}
+
 function Test-SecretSet {
     param(
         [AllowEmptyString()][string]$SecretValue,
