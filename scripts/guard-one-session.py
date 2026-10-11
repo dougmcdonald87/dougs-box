@@ -34,7 +34,11 @@ def is_prior_conflict(prior, this_id, this_created):
     Prior runs that overlap the current workflow's creation are duplicates,
     even when they finished while this Windows job was waiting in the queue.
     """
-    # A read-only audit uses the same OIDC-authorized workflow path but\n    # has NO interactive DevBox. Never mistake it for a duplicate session.\n    if prior.get("display_title") == AUDIT_RUN_TITLE:\n        return False\n    identifier = int(prior["id"])
+    # A read-only audit uses the same OIDC-authorized workflow path but
+    # has NO interactive DevBox. Never mistake it for a duplicate session.
+    if prior.get("display_title") == AUDIT_RUN_TITLE:
+        return False
+    identifier = int(prior["id"])
     if identifier >= this_id:
         return False
     status = prior.get("status")
