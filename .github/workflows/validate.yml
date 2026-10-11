@@ -101,7 +101,7 @@ jobs:
           $exe = Get-ChildItem -LiteralPath $toolsRoot -Filter 'opencode.exe' -File -Recurse | Select-Object -First 1
           if (-not $exe) { throw 'Installer returned but opencode.exe was not installed.' }
           $found = (& $exe.FullName --version | Out-String).Trim()
-          if ($LASTEXITCODE -ne 0 -or $found -ne '2.0.24') {
+          if ($LASTEXITCODE -ne 0 -or $found -ne 'opencode v2.0.24') {
             throw "Expected OpenCode v2.0.24, but Windows executable returned '$found' (exit $LASTEXITCODE)."
           }
           Write-Output 'WINDOWS OPENCODE V2 INSTALL SMOKE: PASS'
