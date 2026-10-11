@@ -10,7 +10,8 @@ function Invoke-DevBoxBackupIsolated {
         Write-Warning 'Verified backup script missing; request rejected.'
         return $false
     }
-    $pwsh = Get-Command pwsh.exe -ErrorAction SilentlyContinue
+    $pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
+    if (-not $pwsh) { $pwsh = Get-Command pwsh.exe -ErrorAction SilentlyContinue }
     if (-not $pwsh) {
         Write-Warning 'PowerShell 7 binary missing; request rejected.'
         return $false
