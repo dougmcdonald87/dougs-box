@@ -98,7 +98,9 @@ jobs:
         shell: pwsh
         env:
           DEVBOX_RDP_PASSWORD: ${{ secrets.DEVBOX_RDP_PASSWORD }}
-        run: ./scripts/configure-rdp.ps1 -Password (New-Object System.Net.NetworkCredential('x', $env:DEVBOX_RDP_PASSWORD).SecurePassword)
+        run: |
+          $secure = ConvertTo-SecureString -String $env:DEVBOX_RDP_PASSWORD -AsPlainText -Force
+          ./scripts/configure-rdp.ps1 -Password $secure
 
       - name: Connect persistence (restic over Tailscale)
         shell: pwsh
