@@ -23,7 +23,11 @@ function Invoke-DevBoxBackupIsolated {
         & $pwsh.Source -NoLogo -NoProfile -NonInteractive -File $SaveScript 2>&1 |
             Out-Host
         $code = $LASTEXITCODE
+        # The nonzero code belongs to the CHILD, not the session manager.
+        # The Boolean is the only success/failure result of this wrapper.
+        $global:LASTEXITCODE = 0
     } catch {
+        $global:LASTEXITCODE = 0
         # Never leak credentials, file contents, or provider stack traces.
         Write-Warning 'Backup child process raised an exception; no verified success.'
         return $false
