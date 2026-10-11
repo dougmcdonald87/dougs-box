@@ -138,8 +138,13 @@ jobs:
           foreach ($rule in @(Get-NetFirewallRule -DisplayGroup 'Remote Desktop')) {
             if ($rule.Enabled -ne 'True') { continue }
             $filter = $rule | Get-NetFirewallAddressFilter
-            if ($filter.RemoteAddress -notcontains '100.64.0.0/10') {
-              throw 'Enabled RDP firewall rule is not restricted to Tailscale IP space.'
+            $ranges = @($filter.RemoteAddress)
+            Write-Output "Firewall RDP rule $($rule.Name): allowed=$($ranges -join ',')"
+            if ($ranges -contains 'Any' -or $ranges -contains '0.0.0.0/0') {
+              throw 'Enabled RDP firewall rule permits public source addresses.'
+            }
+            if (-not ($ranges | Where-Object { $_ -in @('100.64.0.0/10','100.64.0.0/255.192.0.0') })) {
+              throw 'Enabled RDP firewall rule does not match the Tailscale-only source range.'
             }
           }
           Write-Output 'WINDOWS RDP CONFIGURATION: PASS'
