@@ -191,3 +191,27 @@ jobs:
             }
           }
           Write-Output 'WINDOWS RDP CONFIGURATION: PASS'
+      - name: Prove session startup readiness without tailnet or backup side effects
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:DEVBOX_ISOLATED_TEST = '1'
+          $env:RESTIC_PASSWORD = 'CI-only-session-smoke-dummy'
+          $ocFolder = Join-Path $env:DEVBOX_WSROOT 'Tools\OpenCode'
+          New-Item -ItemType Directory -Path $ocFolder -Force | Out-Null
+          New-Item -ItemType File -Path (Join-Path $ocFolder 'opencode.exe') -Force | Out-Null
+          @{
+            startedUtc = [DateTime]::UtcNow.ToString('o')
+            workspaceRoot = $env:DEVBOX_WSROOT
+            readyTargetMinutes = 60
+            jobHardLimitMinutes = 120
+            backupIntervalMin = 10
+          } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $env:DEVBOX_CONTROL_PATH 'session.json')
+          function global:tailscale {
+            if ($args.Count -eq 2 -and $args[0] -eq 'status' -and $args[1] -eq '--json') {
+              '{"Self":{"Tags":["tag:github-devbox"]}}'
+            } else { throw 'Mock tailnet accepts status only.' }
+          }
+          ./scripts/session-manager.ps1 -JobStart -SmokeOnly
+          if ($LASTEXITCODE -ne 0) { throw 'Session manager readiness smoke failed.' }
+          Write-Output 'WINDOWS SESSION MANAGER READINESS SMOKE: PASS'
