@@ -144,3 +144,4 @@ try {
     Remove-Item -LiteralPath $staging -Force -Recurse -ErrorAction SilentlyContinue
 }
 Write-DevBox OK "Snapshot $snapshotId safely processed for this temporary GitHub runner."
+exit 0
