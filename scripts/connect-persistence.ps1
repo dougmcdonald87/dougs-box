@@ -5,21 +5,34 @@ Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot 'common.ps1')
 Write-Step 'connect-persistence'
 
-# ---- resolve the storage host from tailnet peers by tag (no hard-coded IP)
-$tsStatus = & tailscale status --json 2>$null | ConvertFrom-Json
-if (-not $tsStatus) { Stop-DevBox "tailscale status returned nothing. Next action: confirm the tailscale join step succeeded before this one." }
+# ---- resolve existing, USER-OWNED Lenovo without changing its tag/identity.
+# The storage IP is an explicit input; other devices keep their current Tailscale
+# policies, servers, file shares, and RustDesk configuration untouched.
+$storageIp = $env:DEVBOX_STORAGE_TAILSCALE_IP
+if ([string]::IsNullOrWhiteSpace($storageIp)) {
+    Stop-DevBox "DEVBOX_STORAGE_TAILSCALE_IP unset. Configure the value for the existing storage computer. No tailnet device needs retagging."
+}
+$parsedIp = $null
+if (-not ([System.Net.IPAddress]::TryParse($storageIp, [ref]$parsedIp)) -or
+    $parsedIp.AddressFamily -ne [System.Net.Sockets.AddressFamily]::InterNetwork -or
+    -not $storageIp.StartsWith('100.')) {
+    Stop-DevBox "DEVBOX_STORAGE_TAILSCALE_IP must be a valid existing tailnet IPv4 address."
+}
 
+$tsStatus = & tailscale status --json 2>$null | ConvertFrom-Json
+if (-not $tsStatus) {
+    Stop-DevBox "tailscale status returned nothing. Confirm the DevBox join succeeded."
+}
 $storagePeer = $null
 foreach ($prop in $tsStatus.Peer.PSObject.Properties) {
     $peer = $prop.Value
-    if ($peer.Tags -contains 'tag:devbox-storage') { $storagePeer = $peer; break }
+    if ($peer.TailscaleIPs -contains $storageIp) {
+        $storagePeer = $peer
+        break
+    }
 }
 if (-not $storagePeer) {
-    Stop-DevBox "no tailnet peer carries tag:devbox-storage. Next action: tag the storage PC in Tailscale admin (Machines) and re-run."
-}
-$storageIp = $storagePeer.TailscaleIPs[0]
-if ([string]::IsNullOrWhiteSpace($storageIp)) {
-    Stop-DevBox "storage peer has no Tailscale IP. Next action: check 'tailscale status --json' tag output."
+    Stop-DevBox "The existing storage computer ($storageIp) is not visible as a Tailscale peer. No existing device will be retagged or changed."
 }
 
 # ---- reachability proof (Phase 16 step 11 mirrored from the client side)
@@ -49,6 +62,12 @@ if ($LASTEXITCODE -ne 0) { Stop-DevBox "restic binary fails to run. Next action:
 $env:RESTIC_REPOSITORY_URL_FACTOR = $storageIp
 $env:DEVBOX_STORAGE_IP = $storageIp
 $env:DEVBOX_RESTIC_EXE = $resticExe
+
+# Actions steps are isolated processes; preserve the binary location for
+# restore/save/health steps. No secrets are written to GITHUB_ENV.
+if ($env:GITHUB_ENV) {
+    "DEVBOX_RESTIC_EXE=$resticExe" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+}
 
 @{
     storageIp   = $storageIp
