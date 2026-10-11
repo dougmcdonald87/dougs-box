@@ -72,7 +72,7 @@ jobs:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
           audience: ${{ secrets.TS_AUDIENCE }}
           tags: tag:github-devbox
-          version: stable
+          version: latest
           hostname: devbox-${{ github.run_id }}
 
       - name: Discover >=100 GiB workspace
