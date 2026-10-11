@@ -68,3 +68,24 @@ No changes to user devices, Tailscale policy, RustDesk, OpenCode servers, Llama 
 - \`scripts/session-manager.ps1\` and \`.github/workflows/devbox.yml\`: session manager is now the final, blocking workflow step; writes heartbeat and performs health check before reporting READY; periodic saves get the environment-only Restic password.
 
 **Proof status:** All the above modifications are committed in the *safety branch*, but source code was not executed under GitHub/PowerShell/Restic/Tailscale. Static checks and source review are not equivalent to a passing live backup, RDP, or working environment. Additional latent bugs may exist. No tailnet policy or laptop services modified.
+
+
+## Runner probe: empirical correction — October 11, 2026
+
+**The previously suspected 100 GiB runner-blocker is FALSIFIED by actual tests.**
+This supersedes the feasibility warning above, which was based on generic published runner specifications.
+
+Read existing GitHub Actions run **38130858893** (not rerun) using the logged jobs:
+
+| GitHub job | Actual fixed volumes | CPU / RAM | Result |
+| --- | --- | --- | --- |
+| windows-2022 | C: 79.6 GiB free; D: **219.9 GiB** free | 4 / 16 GB | Storage passes |
+| windows-2025-vs2026 | C: 32.3 GiB free; D: **147.0 GiB** free | 4 / 16 GB | Storage passes |
+
+Both job logs reported \`runneradmin exists: True\`, \`TermService: Running\`, \`NLA level: 1\`.
+
+Rule 1 falsifier: If a fresh runner allocated for the actual DevBox session lacks >=100 GiB available on any fixed writable volume, the earlier probe is not representative. Bootstrap and discover-storage must fail closed. The capacity observed here is true for these probe jobs only, not a platform guarantee.
+
+Evidence: https://github.com/dougmcdonald87/dougs-box/actions/runs/38130858893 (jobs 114471818404 and 114471818231 respectively).
+
+**Recommended initial runner:** \`windows-2022\` based on measured free disk. It is not yet selected by the user in repository variables, and DevBox has not been launched.
