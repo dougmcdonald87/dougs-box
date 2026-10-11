@@ -4,6 +4,7 @@
 Only saves this runner's DB to a local staging file included in encrypted Restic.
 Never reads or exports auth.json, keys, cookies, or another computer's database.
 """
+from contextlib import closing
 import os
 from pathlib import Path
 import sqlite3
@@ -20,8 +21,10 @@ def snapshot(source: Path, destination: Path) -> None:
     temporary = destination.with_name(destination.name + "." + uuid.uuid4().hex + ".tmp")
     try:
         # Read-only URI prevents silently creating a new DB if source disappears.
-        with sqlite3.connect(source.as_uri() + "?mode=ro", uri=True, timeout=15) as source_db:
-            with sqlite3.connect(str(temporary), timeout=15) as target_db:
+        # sqlite3.Connection context managers do NOT close the OS file handle.
+        # Windows refuses os.replace() on an open SQLite file.
+        with closing(sqlite3.connect(source.as_uri() + "?mode=ro", uri=True, timeout=15)) as source_db:
+            with closing(sqlite3.connect(str(temporary), timeout=15)) as target_db:
                 source_db.backup(target_db, pages=100, sleep=0.05)
                 result = target_db.execute("PRAGMA integrity_check").fetchone()
                 if not result or result[0] != "ok":
