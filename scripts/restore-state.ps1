@@ -7,6 +7,27 @@ Write-Step 'restore-state'
 
 $persist = (Get-Content (Join-Path $env:DEVBOX_CONTROL_PATH 'persistence.json') -Raw) | ConvertFrom-Json
 
+# First-run gate: there is nothing to restore until the dedicated DevBox
+# repository has been initialized by save-state -First. Restic documents 10
+# as the repository-missing status. Any other error is a hard failure.
+if ([string]::IsNullOrWhiteSpace($env:RESTIC_PASSWORD)) {
+    Stop-DevBox 'RESTIC_PASSWORD missing at restore.'
+}
+$resticExe = $env:DEVBOX_RESTIC_EXE
+if (-not $resticExe -or -not (Test-Path -LiteralPath $resticExe -PathType Leaf)) {
+    Stop-DevBox 'Restic executable unavailable at restore.'
+}
+$probeRepo = [string]$persist.repoUrl
+& $resticExe --repo $probeRepo cat config 2>$null | Out-Null
+$probeExit = $LASTEXITCODE
+if ($probeExit -eq 10) {
+    Write-DevBox INFO 'First run confirmed: dedicated DevBox repository does not exist yet. Nothing to restore.'
+    exit 0
+}
+if ($probeExit -ne 0) {
+    Stop-DevBox "Cannot check existing repository (restic exit $probeExit). Refusing unsafe automatic restore."
+}
+
 # password via RESTIC_PASSWORD env (workflow-provided); never printed, never logged
 if ([string]::IsNullOrWhiteSpace($env:RESTIC_PASSWORD)) {
     Stop-DevBox "RESTIC_PASSWORD empty at restore. Next action: add it to the devbox Environment secrets."
