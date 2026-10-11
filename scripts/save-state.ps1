@@ -118,3 +118,4 @@ try {
     rootCount = $roots.Count
 } | ConvertTo-Json -Compress | Set-Content -LiteralPath (Join-Path $env:DEVBOX_CONTROL_PATH 'last-backup.json') -Encoding utf8
 Write-DevBox OK "Verified backup $snapshotId (snapshot listed and canary restored with matching SHA256)."
+exit 0
