@@ -31,7 +31,7 @@ if ($adminUser) {
 }
 
 # --- password + group membership
-Set-LocalUser -Name $acct -Password $Password -PasswordNeverExpires -AccountNeverExpires
+Set-LocalUser -Name $acct -Password $Password -PasswordNeverExpires $true -AccountNeverExpires -ErrorAction Stop
 # Get-LocalGroupMember has no -Member parameter. Enumerate the group
 # members explicitly and compare SIDs, not localized name strings.
 $acctSid = (Get-LocalUser -Name $acct).SID.Value
@@ -51,7 +51,17 @@ Set-ItemProperty -Path $rdpWin -Name SecurityLayer   -Value 1 -Type DWord
 # comes in - network exposure is governed by the tailnet Grant. We do NOT open
 # 3389 to the internet and we do NOT disable Windows Firewall globally (the
 # Phase 39 audit treats that as a hard fail).
-netsh advfirewall firewall set rule group='remote desktop' new enable=Yes | Out-Null
+# Restrict the enabled Windows RDP firewall group to Tailscale 100.64.0.0/10.
+# The GitHub hosted Windows runner is disposable, but RDP must not be left
+# accessible to arbitrary public IPv4 addresses.
+$rdpRules = @(Get-NetFirewallRule -DisplayGroup 'Remote Desktop' -ErrorAction Stop)
+if ($rdpRules.Count -eq 0) { Stop-DevBox 'No Windows Remote Desktop firewall rules found.' }
+foreach ($rule in $rdpRules) {
+    $rule | Get-NetFirewallAddressFilter | Set-NetFirewallAddressFilter -RemoteAddress '100.64.0.0/10' -ErrorAction Stop | Out-Null
+    if ($rule.Enabled -ne 'True') {
+        Set-NetFirewallRule -Name $rule.Name -Enabled True -ErrorAction Stop | Out-Null
+    }
+}
 
 # --- NO RDS ROLES: verify nothing weird is installed; refuse if a role snuck in
 foreach ($feature in (Get-WindowsFeature | Where-Object { $_.Name -like 'RDS-*' -and $_.Installed })) {
