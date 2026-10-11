@@ -58,6 +58,10 @@ jobs:
         shell: bash
         run: python3 tests/guard-one-session.tests.py
 
+      - name: Adversarial SQLite history snapshot consistency
+        shell: bash
+        run: python3 tests/opencode-history.tests.py
+
       - name: Adversarial user-stop control regression
         shell: pwsh
         run: ./tests/control-queue.tests.ps1
@@ -204,6 +208,11 @@ jobs:
           @{ repoUrl = $repo; storageIp = 'test-only-loopback' } | ConvertTo-Json |
             Set-Content -LiteralPath (Join-Path $env:DEVBOX_CONTROL_PATH 'persistence.json') -Encoding utf8
           ./scripts/install-restic.ps1 -ToolsRoot (Split-Path $env:DEVBOX_RESTIC_EXE -Parent)
+          # Simulate an OpenCode v2 session DB that must survive a new runner.
+          $env:OPENCODE_CI_DB = Join-Path $env:USERPROFILE '.local\share\opencode\opencode.db'
+          New-Item -ItemType Directory -Path (Split-Path $env:OPENCODE_CI_DB -Parent) -Force | Out-Null
+          python -c "import os,sqlite3; p=os.environ['OPENCODE_CI_DB']; c=sqlite3.connect(p); c.execute('CREATE TABLE sessions (id TEXT)'); c.execute('INSERT INTO sessions VALUES (?)', ('important-session',)); c.commit(); c.close()"
+          Set-Content -LiteralPath (Join-Path (Split-Path $env:OPENCODE_CI_DB -Parent) 'auth.json') -Value 'FAKE-TEST-AUTH-NEVER-BACKUP'
           ./scripts/restore-state.ps1
           ./scripts/save-state.ps1 -First
           if (-not (Test-Path -LiteralPath (Join-Path $env:DEVBOX_CONTROL_PATH 'last-backup.json'))) {
@@ -211,7 +220,14 @@ jobs:
           }
           Remove-Item -LiteralPath (Join-Path $projectsDir.FullName 'PROJECT-TEST.txt') -Force
           Remove-Item -LiteralPath (Join-Path $workspaceDir.FullName 'WORKSPACE-TEST.txt') -Force
+          Remove-Item -LiteralPath $env:OPENCODE_CI_DB -Force
+          Remove-Item -LiteralPath (Join-Path (Split-Path $env:OPENCODE_CI_DB -Parent) 'auth.json') -Force
           ./scripts/restore-state.ps1
+          if (-not (Test-Path -LiteralPath $env:OPENCODE_CI_DB -PathType Leaf)) { throw 'OpenCode DB NOT restored.' }
+          python -c "import os,sqlite3; c=sqlite3.connect(os.environ['OPENCODE_CI_DB']); assert c.execute('SELECT id FROM sessions').fetchall() == [('important-session',)]; c.close()"
+          if ($LASTEXITCODE -ne 0) { throw 'OpenCode session row missing or database corrupted.' }
+          if (Test-Path -LiteralPath (Join-Path (Split-Path $env:OPENCODE_CI_DB -Parent) 'auth.json')) { throw 'OpenCode auth.json was persisted against policy.' }
+          Write-Output 'WINDOWS OPENCODE HISTORY RESTORE WITHOUT AUTH: PASS'
           if ((Get-Content -LiteralPath (Join-Path $projectsDir.FullName 'PROJECT-TEST.txt') -Raw).Trim() -ne 'persist me: project') { throw 'Project was NOT restored.' }
           if ((Get-Content -LiteralPath (Join-Path $workspaceDir.FullName 'WORKSPACE-TEST.txt') -Raw).Trim() -ne 'persist me: workspace') { throw 'Workspace was NOT restored.' }
           Write-Output 'WINDOWS RESTIC BACKUP AND REAL WORK RECOVERY: PASS'
