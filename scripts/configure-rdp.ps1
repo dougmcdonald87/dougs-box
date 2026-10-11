@@ -10,7 +10,7 @@ Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot 'common.ps1')
 Write-Step 'configure-rdp'
 
-if ([string]::IsNullOrWhiteSpace((New-Object System.Net.NetworkCredential('x', $Password).Password))) {
+if ($Password.Length -eq 0) {
     Stop-DevBox "DEVBOX_RDP_PASSWORD empty. Next action: add it to the devbox Environment secrets."
 }
 
