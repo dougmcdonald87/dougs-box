@@ -9,11 +9,10 @@ on:
 permissions:
   contents: read
   id-token: write   # Tailscale Workload Identity Federation (OIDC)
+  actions: read     # read-only single-session duplicate/admission guard
 
-# One DevBox at a time. A new manual launch cancels any previous session.
-concurrency:
-  group: devbox-session
-  cancel-in-progress: true
+# A preflight guard rejects duplicate launches; the Windows job is serialized
+# below without EVER cancelling an existing user's session.
 
 # 350 min job timeout sits below the 360 min GitHub hard limit and leaves the
 # session manager ~30 min of headroom under the interactive 5h20-5h30 target.
@@ -32,6 +31,17 @@ jobs:
     outputs:
       label: ${{ steps.label.outputs.label }}
     steps:
+      - name: Checkout for duplicate-admission check
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - name: Refuse duplicate start while prior DevBox is alive
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 ./scripts/guard-one-session.py
+
       - name: Resolve DEVBOX_RUNNER_LABEL against tested allowlist
         id: label
         shell: bash
@@ -59,11 +69,20 @@ jobs:
     runs-on: ${{ needs.preflight.outputs.label }}
     environment: devbox
     timeout-minutes: 350
+    concurrency:
+      group: devbox-windows-session
+      cancel-in-progress: false
     steps:
       - name: Checkout
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
+
+      - name: Refuse a queued duplicate before starting Windows setup
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python ./scripts/guard-one-session.py
 
       - name: Bootstrap workspace root and structure
         shell: pwsh
