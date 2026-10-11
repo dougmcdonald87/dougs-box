@@ -18,6 +18,9 @@ if ($LASTEXITCODE -ne 0 -or $current -cne 'GMT Standard Time') {
     throw "DEVBOX TIMEZONE FAILED: expected GMT Standard Time without _dstoff, got '$current'."
 }
 
+# .NET may have cached the earlier Windows time zone in this PowerShell process.
+[TimeZoneInfo]::ClearCachedData()
+
 # Rule 1: a matching time-zone name alone is insufficient. Check both sides
 # of the UK DST transition using genuine UTC instants on this Windows runner.
 $zone = [TimeZoneInfo]::Local
