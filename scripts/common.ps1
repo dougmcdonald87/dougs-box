@@ -64,10 +64,15 @@ function Invoke-DevboxRetry {
     )
     for ($i = 1; $i -le $Attempts; $i++) {
         try {
+            # The retry callers run PowerShell cmdlets, which do not set
+            # LASTEXITCODE. Under StrictMode, reading it before a native
+            # command has run throws and makes every valid attempt fail.
+            # Convert non-terminating cmdlet errors into exceptions and use
+            # PowerShell's always-initialized success status instead.
+            $ErrorActionPreference = 'Stop'
             & $Script
-            # A script with no native exits has no $LASTEXITCODE; treat any 0-or-null as success.
-            if ($null -eq $LASTEXITCODE -or $LASTEXITCODE -eq 0) { return }
-            throw "command exited with $LASTEXITCODE"
+            if ($?) { return }
+            throw 'command reported failure (PowerShell success status was false)'
         } catch {
             Write-DevBox WARN "attempt $i/$Attempts failed: $($_.Exception.Message)"
         }
