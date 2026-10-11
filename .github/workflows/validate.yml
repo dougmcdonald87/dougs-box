@@ -238,7 +238,7 @@ jobs:
           New-Item -ItemType Directory -Path (Join-Path $differentDriveStage 'D\DevBox\Projects') -Force | Out-Null
           Set-Content -LiteralPath (Join-Path $differentDriveStage 'D\DevBox\Projects\DRIVE-SWITCH-PROOF.txt') -Value 'previous-D-drive'
           . ./scripts/find-staged-work.ps1
-          $foundOld = Find-DevBoxStagedWork -StagingRoot $differentDriveStage -Name Projects
+          $foundOld = Find-DevBoxStagedWork -StagingRoot $differentDriveStage -Name Projects -SnapshotPaths @('D:\DevBox\Projects')
           if (-not $foundOld) { throw 'Previous D drive Projects were not located.' }
           $restoredProof = Join-Path $env:DEVBOX_WSROOT 'Projects\DRIVE-SWITCH-PROOF.txt'
           Copy-Item -LiteralPath (Join-Path $foundOld 'DRIVE-SWITCH-PROOF.txt') -Destination $restoredProof -Force
