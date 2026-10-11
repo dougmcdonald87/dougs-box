@@ -119,6 +119,37 @@ jobs:
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
+      - name: Adversarial UK timezone and DST transition on disposable Windows
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $original = (& tzutil.exe /g | Out-String).Trim()
+          if (-not $original) { throw 'Could not read original timezone.' }
+          try {
+            # Deliberately start with the wrong timezone, including no BST shift.
+            & tzutil.exe /s 'UTC'
+            if ($LASTEXITCODE -ne 0) { throw 'Could not establish false UTC baseline.' }
+            [TimeZoneInfo]::ClearCachedData()
+            $before = [TimeZoneInfo]::Local
+            $july = [datetime]::SpecifyKind([datetime]'2026-07-15T12:00:00', [DateTimeKind]::Utc)
+            if ($before.Id -ne 'UTC' -or $before.GetUtcOffset($july).TotalMinutes -ne 0) {
+              throw 'Falsifier baseline not established.'
+            }
+            Write-Output 'COUNTEREXAMPLE: UTC baseline is wrong for July BST.'
+            ./scripts/configure-timezone.ps1
+            if ($LASTEXITCODE -ne 0) { throw 'Timezone setup script failed.' }
+            $after = (& tzutil.exe /g | Out-String).Trim()
+            [TimeZoneInfo]::ClearCachedData()
+            if ($after -ne 'GMT Standard Time' -or [TimeZoneInfo]::Local.GetUtcOffset($july).TotalMinutes -ne 60) {
+              throw 'Timezone script did not fix winter/summer distinction.'
+            }
+            Write-Output 'WINDOWS UK TIMEZONE + DST ADVERSARIAL TEST: PASS'
+          } finally {
+            & tzutil.exe /s $original
+            [TimeZoneInfo]::ClearCachedData()
+            if ($LASTEXITCODE -ne 0) { throw 'Failed restoring test runner original timezone.' }
+          }
+
       - name: Install and inspect both public desktop shortcuts
         shell: pwsh
         run: |
