@@ -64,7 +64,7 @@ else {
 $tsSvc = Get-Service TermService -ErrorAction SilentlyContinue
 if ($tsSvc.Status -ne 'Running') { Add-Failure 'TermService not running' 'enable+start via configure-rdp' }
 $nla = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -ErrorAction SilentlyContinue).UserAuthentication
-if ($nla -ne 2) { Add-Failure 'NLA not enforced' 'configure-rdp sets UserAuthentication=2; re-run it' }
+if ($nla -ne 1) { Add-Failure 'NLA not enforced' 'configure-rdp sets UserAuthentication=1; re-run it' }
 if (-not (Get-NetTCPConnection -LocalPort 3389 -State Listen -ErrorAction SilentlyContinue)) {
     Add-Failure '3389 not listening' 'check TermService + Windows service log'
 }
