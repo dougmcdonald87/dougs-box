@@ -25,7 +25,17 @@ if ($existing) {
 #    public; both URLs below resolve the LATEST v2 Windows binary.
 $api = 'https://api.github.com/repos/sst/opencode/releases/latest'
 Invoke-DevboxRetry -Script {
-    $rel = Invoke-RestMethod -Uri $api -Headers @{ Accept = 'application/vnd.github+json' }
+    # GitHub-hosted runner IPs can exhaust the anonymous GitHub API quota.
+    # Use this workflow's ephemeral, read-only GitHub token when available.
+    $headers = @{
+        Accept = 'application/vnd.github+json'
+        'User-Agent' = 'DevBox-OpenCode-Installer'
+        'X-GitHub-Api-Version' = '2022-11-28'
+    }
+    if (-not [string]::IsNullOrWhiteSpace($env:GH_TOKEN)) {
+        $headers.Authorization = 'Bearer ' + $env:GH_TOKEN
+    }
+    $rel = Invoke-RestMethod -Uri $api -Headers $headers -ErrorAction Stop
     $asset = $rel.assets | Where-Object { $_.name -match 'windows.*x64' -and $_.name -match '\.zip$' } | Select-Object -First 1
     if (-not $asset) { throw "no windows x64 zip in latest release" }
     "opencode-version=$($rel.tag_name)" | Set-Content (Join-Path $dir 'version.txt') -Encoding ascii

@@ -46,17 +46,13 @@ Write-DevBox OK "rest-server reachable at ${storageIp}:8000"
 #      Download once into the shared Tools dir; sha256 recorded for the log.
 $resticRoot = New-DevboxDirectorySafe (Join-Path $env:DEVBOX_WSROOT 'Tools\restic')
 $resticExe = Join-Path $resticRoot 'restic.exe'
-$resticVersion = '0.18.4'   # candidate version; Phase 1 live research duty on first real run
-if (-not (Test-Path $resticExe)) {
-    $zip = Join-Path $resticRoot 'restic.zip'
-    Invoke-DevboxRetry -Script {
-        Invoke-WebRequest -Uri "https://github.com/restic/restic/releases/download/v$resticVersion/restic_${resticVersion}_windows_amd64.zip" -OutFile $zip
-        Expand-Archive -LiteralPath $zip -DestinationPath $resticRoot -Force
-    } -Attempts 3
+# Stable upstream release and independently published zip SHA-256.
+# Actual archive executable is VERSIONED, e.g. restic_0.19.1_windows_amd64.exe.
+$resticVersion = '0.19.1'
+& (Join-Path $PSScriptRoot 'install-restic.ps1') -ToolsRoot $resticRoot
+if (-not (Test-Path -LiteralPath $resticExe -PathType Leaf)) {
+    Stop-DevBox 'Restic installation helper did not provide restic.exe.'
 }
-if (-not (Test-Path $resticExe)) { Stop-DevBox "restic.exe missing after download. Next action: confirm asset name on restic releases." }
-& $resticExe version | Out-Null
-if ($LASTEXITCODE -ne 0) { Stop-DevBox "restic binary fails to run. Next action: see TROUBLESHOOTING 'restic'." }
 
 # ---- state for the rest of the session (NO password in any file here)
 $env:RESTIC_REPOSITORY_URL_FACTOR = $storageIp

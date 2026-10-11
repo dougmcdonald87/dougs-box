@@ -19,8 +19,8 @@ if (-not (Test-Path -LiteralPath $stateFile)) {
 $state = Get-Content -LiteralPath $stateFile -Raw | ConvertFrom-Json
 $repo = [string]$state.repoUrl
 $restic = [string]$env:DEVBOX_RESTIC_EXE
-if (-not $repo.StartsWith('rest:http://100.')) {
-    Stop-DevBox 'Refusing backup: repository URL is not an expected Tailscale-only rest-server endpoint.'
+if (-not (Test-DevBoxRepoDestination -Repo $repo)) {
+    Stop-DevBox 'Refusing backup: repository is not the dedicated Lenovo endpoint or an approved disposable CI test repository.'
 }
 
 # Restic natively supports RESTIC_PASSWORD from the process environment.
@@ -46,7 +46,11 @@ $expectedHash = (Get-FileHash -LiteralPath $canaryFile -Algorithm SHA256).Hash
 
 # Explicitly include the canary. The original script created it but never
 # added its directory to the backup command.
-$roots = @($canaryDir)
+# The actual work must be saved. Canary-only snapshots are NOT persistence.
+# Do not back up disposable Tools, Temp, Downloads or Build directories.
+$projectsDir = New-DevboxDirectorySafe (Join-Path $env:DEVBOX_WSROOT 'Projects')
+$workspaceDir = New-DevboxDirectorySafe (Join-Path $env:DEVBOX_WSROOT 'Workspace')
+$roots = @($canaryDir, $projectsDir, $workspaceDir)
 $configFile = Join-Path $PSScriptRoot '..\config\devbox.json'
 $config = if (Test-Path -LiteralPath $configFile) { Get-Content -LiteralPath $configFile -Raw | ConvertFrom-Json } else { $null }
 $hot = if ($config -and $config.hot_paths) { @($config.hot_paths) } else {
@@ -114,3 +118,4 @@ try {
     rootCount = $roots.Count
 } | ConvertTo-Json -Compress | Set-Content -LiteralPath (Join-Path $env:DEVBOX_CONTROL_PATH 'last-backup.json') -Encoding utf8
 Write-DevBox OK "Verified backup $snapshotId (snapshot listed and canary restored with matching SHA256)."
+exit 0

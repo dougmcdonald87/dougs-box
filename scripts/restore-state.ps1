@@ -18,6 +18,9 @@ if (-not (Test-Path -LiteralPath $persistenceFile -PathType Leaf)) {
 }
 $persist = Get-Content -LiteralPath $persistenceFile -Raw | ConvertFrom-Json
 $repo = [string]$persist.repoUrl
+if (-not (Test-DevBoxRepoDestination -Repo $repo)) {
+    Stop-DevBox 'Refusing restore: repository is not the dedicated Lenovo endpoint or an approved disposable CI test repository.'
+}
 
 # A brand-new, dedicated repository is initialized only by the first verified
 # backup. A wrong password or unreachable server must NOT masquerade as empty.
@@ -55,7 +58,7 @@ if ([string]::IsNullOrWhiteSpace($snapshotId)) {
 $cfgFile = Join-Path $PSScriptRoot '..\config\devbox.json'
 $cfg = if (Test-Path -LiteralPath $cfgFile) { Get-Content -LiteralPath $cfgFile -Raw | ConvertFrom-Json } else { $null }
 $limitGiB = if ($cfg -and $cfg.auto_restore_max_gib) { [double]$cfg.auto_restore_max_gib } else { 3.0 }
-$statsRaw = (& $restic --repo $repo stats $snapshotId --mode archive-size --json 2>&1 | Out-String)
+$statsRaw = (& $restic --repo $repo stats $snapshotId --mode restore-size --json 2>&1 | Out-String)
 if ($LASTEXITCODE -ne 0) {
     Stop-DevBox 'Could not measure snapshot size. Refusing an unbounded automatic restore.'
 }
@@ -114,7 +117,31 @@ try {
         }
         Write-DevBox OK "HOT state restored into runner: $target"
     }
+
+    # Restore the DevBox's actual working directories. The backup script
+    # includes these roots; otherwise the next ephemeral runner starts empty.
+    # Stage first, then copy into the new runner workspace only.
+    foreach ($name in @('Projects', 'Workspace')) {
+        $target = Join-Path $env:DEVBOX_WSROOT $name
+        $driveLetter = $target.Substring(0, 1)
+        $tail = $target.Substring(3)
+        $candidates = @(
+            (Join-Path $staging (Join-Path $driveLetter $tail)),
+            (Join-Path $staging $tail)
+        )
+        $source = $candidates | Where-Object { Test-Path -LiteralPath $_ -PathType Container } | Select-Object -First 1
+        if (-not $source) {
+            Write-DevBox WARN "Snapshot did not contain saved $name directory; older canary-only snapshot is possible."
+            continue
+        }
+        New-DevboxDirectorySafe $target | Out-Null
+        foreach ($child in (Get-ChildItem -LiteralPath $source -Force)) {
+            Copy-Item -LiteralPath $child.FullName -Destination (Join-Path $target $child.Name) -Recurse -Force -ErrorAction Stop
+        }
+        Write-DevBox OK "Restored saved DevBox $name into the new ephemeral runner."
+    }
 } finally {
     Remove-Item -LiteralPath $staging -Force -Recurse -ErrorAction SilentlyContinue
 }
 Write-DevBox OK "Snapshot $snapshotId safely processed for this temporary GitHub runner."
+exit 0

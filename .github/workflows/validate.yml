@@ -89,6 +89,8 @@ jobs:
 
       - name: Install actual OpenCode on clean Windows runner
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
           $env:DEVBOX_WSROOT = Join-Path $env:RUNNER_TEMP 'DevBox-QA'
@@ -101,3 +103,115 @@ jobs:
           & $exe.FullName --version
           if ($LASTEXITCODE -ne 0) { throw "Installed OpenCode failed on Windows: $LASTEXITCODE" }
           Write-Output 'WINDOWS OPENCODE INSTALL SMOKE: PASS'
+
+  windows-backup-restore:
+    name: Windows real Restic backup and restore (isolated local repo)
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 12
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Verify actual DevBox snapshot and working file recovery
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:DEVBOX_ISOLATED_TEST = '1'
+          $env:DEVBOX_WSROOT = Join-Path $env:RUNNER_TEMP 'DevBox-Storage-QA'
+          $env:DEVBOX_CONTROL_PATH = Join-Path $env:DEVBOX_WSROOT 'Control'
+          $env:RESTIC_PASSWORD = 'CI-only-dummy-restic-encryption-key'
+          $env:GITHUB_RUN_ID = 'ci-isolated-test'
+          $env:DEVBOX_RESTIC_EXE = Join-Path $env:DEVBOX_WSROOT 'Tools\restic\restic.exe'
+          $repo = Join-Path $env:RUNNER_TEMP 'DevBox-Isolated-Restic-Repo'
+          New-Item -ItemType Directory -Path $env:DEVBOX_CONTROL_PATH -Force | Out-Null
+          New-Item -ItemType Directory -Path (Join-Path $env:DEVBOX_WSROOT 'Temp') -Force | Out-Null
+          $projectsDir = New-Item -ItemType Directory -Path (Join-Path $env:DEVBOX_WSROOT 'Projects') -Force
+          $workspaceDir = New-Item -ItemType Directory -Path (Join-Path $env:DEVBOX_WSROOT 'Workspace') -Force
+          Set-Content -LiteralPath (Join-Path $projectsDir.FullName 'PROJECT-TEST.txt') -Value 'persist me: project' -Encoding ascii
+          Set-Content -LiteralPath (Join-Path $workspaceDir.FullName 'WORKSPACE-TEST.txt') -Value 'persist me: workspace' -Encoding ascii
+          @{ repoUrl = $repo; storageIp = 'test-only-loopback' } | ConvertTo-Json |
+            Set-Content -LiteralPath (Join-Path $env:DEVBOX_CONTROL_PATH 'persistence.json') -Encoding utf8
+          ./scripts/install-restic.ps1 -ToolsRoot (Split-Path $env:DEVBOX_RESTIC_EXE -Parent)
+          ./scripts/restore-state.ps1
+          ./scripts/save-state.ps1 -First
+          if (-not (Test-Path -LiteralPath (Join-Path $env:DEVBOX_CONTROL_PATH 'last-backup.json'))) {
+            throw 'Verified snapshot metadata was not produced.'
+          }
+          Remove-Item -LiteralPath (Join-Path $projectsDir.FullName 'PROJECT-TEST.txt') -Force
+          Remove-Item -LiteralPath (Join-Path $workspaceDir.FullName 'WORKSPACE-TEST.txt') -Force
+          ./scripts/restore-state.ps1
+          if ((Get-Content -LiteralPath (Join-Path $projectsDir.FullName 'PROJECT-TEST.txt') -Raw).Trim() -ne 'persist me: project') { throw 'Project was NOT restored.' }
+          if ((Get-Content -LiteralPath (Join-Path $workspaceDir.FullName 'WORKSPACE-TEST.txt') -Raw).Trim() -ne 'persist me: workspace') { throw 'Workspace was NOT restored.' }
+          Write-Output 'WINDOWS RESTIC BACKUP AND REAL WORK RECOVERY: PASS'
+
+  windows-devbox-stages:
+    name: Windows stage smoke - Restic, RDP and firewall
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 14
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Install and verify real Restic
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:DEVBOX_WSROOT = Join-Path $env:RUNNER_TEMP 'DevBox-QA'
+          $env:DEVBOX_CONTROL_PATH = Join-Path $env:DEVBOX_WSROOT 'Control'
+          New-Item -ItemType Directory -Path $env:DEVBOX_CONTROL_PATH -Force | Out-Null
+          $path = Join-Path $env:DEVBOX_WSROOT 'Tools\restic'
+          ./scripts/install-restic.ps1 -ToolsRoot $path
+          & (Join-Path $path 'restic.exe') version
+          if ($LASTEXITCODE -ne 0) { throw 'Installed restic failed on Windows.' }
+          "DEVBOX_WSROOT=$env:DEVBOX_WSROOT" >> $env:GITHUB_ENV
+          "DEVBOX_CONTROL_PATH=$env:DEVBOX_CONTROL_PATH" >> $env:GITHUB_ENV
+          Write-Output 'WINDOWS RESTIC INSTALL: PASS'
+      - name: Configure real RDP on disposable Windows runner
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $password = ConvertTo-SecureString -String 'RunOnly!Dbx2026#Test' -AsPlainText -Force
+          ./scripts/configure-rdp.ps1 -Password $password
+          $nla = (Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp').UserAuthentication
+          if ($nla -ne 1) { throw 'RDP NLA not enabled.' }
+          $listener = @(Get-NetTCPConnection -LocalPort 3389 -State Listen -ErrorAction SilentlyContinue)
+          if ($listener.Count -eq 0) { throw 'No TCP 3389 listener.' }
+          foreach ($rule in @(Get-NetFirewallRule -DisplayGroup 'Remote Desktop')) {
+            if ($rule.Enabled -ne 'True') { continue }
+            $filter = $rule | Get-NetFirewallAddressFilter
+            $ranges = @($filter.RemoteAddress)
+            Write-Output "Firewall RDP rule $($rule.Name): allowed=$($ranges -join ',')"
+            if ($ranges -contains 'Any' -or $ranges -contains '0.0.0.0/0') {
+              throw 'Enabled RDP firewall rule permits public source addresses.'
+            }
+            if (-not ($ranges | Where-Object { $_ -in @('100.64.0.0/10','100.64.0.0/255.192.0.0') })) {
+              throw 'Enabled RDP firewall rule does not match the Tailscale-only source range.'
+            }
+          }
+          Write-Output 'WINDOWS RDP CONFIGURATION: PASS'
+      - name: Prove session startup readiness without tailnet or backup side effects
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:DEVBOX_ISOLATED_TEST = '1'
+          $env:RESTIC_PASSWORD = 'CI-only-session-smoke-dummy'
+          $ocFolder = Join-Path $env:DEVBOX_WSROOT 'Tools\OpenCode'
+          New-Item -ItemType Directory -Path $ocFolder -Force | Out-Null
+          New-Item -ItemType File -Path (Join-Path $ocFolder 'opencode.exe') -Force | Out-Null
+          @{
+            startedUtc = [DateTime]::UtcNow.ToString('o')
+            workspaceRoot = $env:DEVBOX_WSROOT
+            readyTargetMinutes = 60
+            jobHardLimitMinutes = 120
+            backupIntervalMin = 10
+          } | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $env:DEVBOX_CONTROL_PATH 'session.json')
+          function global:tailscale {
+            if ($args.Count -eq 2 -and $args[0] -eq 'status' -and $args[1] -eq '--json') {
+              '{"Self":{"Tags":["tag:github-devbox"]}}'
+            } else { throw 'Mock tailnet accepts status only.' }
+          }
+          ./scripts/session-manager.ps1 -JobStart -SmokeOnly
+          if ($LASTEXITCODE -ne 0) { throw 'Session manager readiness smoke failed.' }
+          Write-Output 'WINDOWS SESSION MANAGER READINESS SMOKE: PASS'

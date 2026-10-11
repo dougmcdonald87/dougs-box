@@ -1,7 +1,7 @@
 # session-manager.ps1 — keep the one GitHub Actions job alive after readiness.
 # No laptop, existing Tailscale policy, mapped drive, or RustDesk configuration
 # is modified by this script.
-param([switch]$JobStart)
+param([switch]$JobStart, [switch]$SmokeOnly)
 Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot 'common.ps1')
 
@@ -58,6 +58,13 @@ if ($LASTEXITCODE -ne 0) {
     Stop-DevBox 'Session health check failed. DEVBOX READY was not announced.'
 }
 & (Join-Path $PSScriptRoot 'health-check.ps1') -SummaryOnly
+if ($SmokeOnly) {
+    if ($env:DEVBOX_ISOLATED_TEST -ne '1' -or $env:GITHUB_ACTIONS -ne 'true') {
+        Stop-DevBox 'Smoke-only session exit is restricted to isolated GitHub regression jobs.'
+    }
+    Write-DevBox OK 'SESSION STARTUP SMOKE: health checks passed; no long-running session started.'
+    exit 0
+}
 Write-DevBox OK 'DEVBOX READY — interactive session now held open by the active Actions job.'
 
 while ($true) {
