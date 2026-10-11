@@ -67,3 +67,6 @@ if (-not $expectedFailure -or $script:nativeCalls -ne 2) {
     throw "Regression: nonzero native command was not rejected after two attempts (calls: $script:nativeCalls)."
 }
 Write-Output 'PASS: nonzero native exit is rejected.'
+# All assertions passed. The native-failure regression intentionally ran a
+# subprocess returning 9; make the test process explicitly report success.
+exit 0
