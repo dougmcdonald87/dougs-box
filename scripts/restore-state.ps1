@@ -126,8 +126,46 @@ try {
     # Stage first, then copy into the new runner workspace only.
     foreach ($name in @('Projects', 'Workspace')) {
         $target = Join-Path $env:DEVBOX_WSROOT $name
-        $source = Find-DevBoxStagedWork -StagingRoot $staging -Name $name
+        $source = Find-DevBoxStagedWork -StagingRoot $staging -Name $name -SnapshotPaths @($latest.paths)
         if (-not $source) {
+            # If this snapshot CLAIMED to include work, a missing stage is a
+            # restoration failure, not an empty workspace. Never silently
+            # discard the previous project's apparent backup.
+            $claimedWork = @($latest.paths | Where-Object { [string]$_ -match ("[\\/]" + [regex]::Escape($name) + '
+            continue
+        }
+        New-DevboxDirectorySafe $target | Out-Null
+        foreach ($child in (Get-ChildItem -LiteralPath $source -Force)) {
+            Copy-Item -LiteralPath $child.FullName -Destination (Join-Path $target $child.Name) -Recurse -Force -ErrorAction Stop
+        }
+        Write-DevBox OK "Restored saved DevBox $name into the new ephemeral runner."
+    }
+    # Import only the explicitly staged OpenCode SQLite snapshot after
+    # restic finishes and before this runner starts an interactive OpenCode.
+    $dbSnapshots = @(Get-ChildItem -LiteralPath $staging -Recurse -File -Filter 'opencode.db' |
+        Where-Object { $_.FullName -match '[\\/]+PersistentData[\\/]+OpenCodeHistory[\\/]+opencode\.db$' })
+    if ($dbSnapshots.Count -gt 1) {
+        Stop-DevBox 'Ambiguous OpenCode DB snapshots: refusing to import arbitrary history.'
+    }
+    if ($dbSnapshots.Count -eq 1) {
+        $targetDb = Join-Path $env:USERPROFILE '.local\share\opencode\opencode.db'
+        & python (Join-Path $PSScriptRoot 'snapshot-opencode-db.py') $dbSnapshots[0].FullName $targetDb
+        if ($LASTEXITCODE -ne 0) {
+            Stop-DevBox 'OpenCode DB restore/integrity check failed.'
+        }
+        Write-DevBox OK 'Restored consistent OpenCode session history SQLite database.'
+    } else {
+        Write-DevBox INFO 'No saved OpenCode v2 SQLite history in this snapshot.'
+    }
+} finally {
+    Remove-Item -LiteralPath $staging -Force -Recurse -ErrorAction SilentlyContinue
+}
+Write-DevBox OK "Snapshot $snapshotId safely processed for this temporary GitHub runner."
+exit 0
+) })
+            if ($claimedWork.Count -gt 0) {
+                Stop-DevBox "Snapshot lists $name but staged data was not located: refuse silent data loss."
+            }
             Write-DevBox WARN "Snapshot did not contain saved $name directory; older canary-only snapshot is possible."
             continue
         }
