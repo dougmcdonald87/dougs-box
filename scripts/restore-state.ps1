@@ -89,8 +89,7 @@ try {
           "$env:USERPROFILE\AGENTS.md",
           "$env:USERPROFILE\Documents\DevBox-Notes")
     }
-    # Legacy OpenCode project sessions are separate from the config folder.
-    # Keep authentication data excluded by the backup producer.
+    # Legacy project/session records have their own user-profile directory.
     $hotPaths = @($hotPaths) + @(Join-Path $env:USERPROFILE '.local\share\opencode\project')
     foreach ($rawPath in $hotPaths) {
         $target = [Environment]::ExpandEnvironmentVariables([string]$rawPath)
@@ -143,14 +142,10 @@ try {
         }
         Write-DevBox OK "Restored saved DevBox $name into the new ephemeral runner."
     }
-    # OpenCode v2's SQLite DB was snapshotted consistently while the old
-    # runner was active; recover it BEFORE anyone launches OpenCode on this VM.
-    # Do not import auth.json or other authentication material.
+    # Import only the explicitly staged OpenCode SQLite snapshot after
+    # restic finishes and before this runner starts an interactive OpenCode.
     $dbSnapshots = @(Get-ChildItem -LiteralPath $staging -Recurse -File -Filter 'opencode.db' |
-        Where-Object { $_.FullName -match '[\\/]+PersistentData[\\/]+OpenCodeHistory[\\/]+opencode\.db
-Write-DevBox OK "Snapshot $snapshotId safely processed for this temporary GitHub runner."
-exit 0
- })
+        Where-Object { $_.FullName -match '[\\/]+PersistentData[\\/]+OpenCodeHistory[\\/]+opencode\.db$' })
     if ($dbSnapshots.Count -gt 1) {
         Stop-DevBox 'Ambiguous OpenCode DB snapshots: refusing to import arbitrary history.'
     }
