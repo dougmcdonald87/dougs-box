@@ -54,6 +54,10 @@ jobs:
         shell: pwsh
         run: ./tests/retry-strictmode.tests.ps1
 
+      - name: Adversarial user-stop control regression
+        shell: pwsh
+        run: ./tests/control-queue.tests.ps1
+
       - name: Append-only law + data-loss audit
         # Phase 41: destructive commands must appear in ZERO code files.
         # Scope = code (.ps1/.psd1/.json). The two enforcement artifacts are
@@ -105,6 +109,36 @@ jobs:
             throw "Expected OpenCode v2.0.24, but Windows executable returned '$found' (exit $LASTEXITCODE)."
           }
           Write-Output 'WINDOWS OPENCODE V2 INSTALL SMOKE: PASS'
+
+  windows-control-links:
+    name: Windows RDP desktop shortcut smoke (disposable runner)
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 8
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Install and inspect both public desktop shortcuts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:DEVBOX_WSROOT = Join-Path $env:RUNNER_TEMP 'DevBox-Control-Desktop-QA'
+          $control = Join-Path $env:DEVBOX_WSROOT 'Control'
+          New-Item -ItemType Directory -Path $control -Force | Out-Null
+          New-Item -ItemType Directory -Path (Join-Path $env:DEVBOX_WSROOT 'Workspace') -Force | Out-Null
+          Set-Content -LiteralPath (Join-Path $control 'session.json') -Value '{}' -Encoding ascii
+          ./scripts/install-desktop-controls.ps1
+          $desktop = [Environment]::GetFolderPath('CommonDesktopDirectory')
+          $shell = New-Object -ComObject WScript.Shell
+          foreach ($name in @('Save DevBox State Now','Finish DevBox Safely')) {
+            $link = Join-Path $desktop "$name.lnk"
+            if (-not (Test-Path -LiteralPath $link)) { throw "Desktop control missing: $name" }
+            $shortcut = $shell.CreateShortcut($link)
+            if ($shortcut.Arguments -notlike '*request-control.ps1*') { throw "Unexpected shortcut target for $name" }
+            Write-Output "CONTROL SHORTCUT CONFIRMED: $name"
+          }
+          Write-Output 'WINDOWS DESKTOP CONTROL SMOKE: PASS'
 
   windows-backup-restore:
     name: Windows real Restic backup and restore (isolated local repo)
