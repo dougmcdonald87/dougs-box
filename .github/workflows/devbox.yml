@@ -66,6 +66,13 @@ jobs:
         shell: pwsh
         run: ./scripts/bootstrap.ps1
 
+      - name: Check GitHub OIDC claims before Tailscale
+        shell: pwsh
+        env:
+          TS_OAUTH_CLIENT_ID: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          TS_AUDIENCE: ${{ secrets.TS_AUDIENCE }}
+        run: ./scripts/check-tailscale-oidc.ps1
+
       - name: Join tailnet (WIF/OIDC, ephemeral, tagged)
         uses: tailscale/github-action@d1b6cd204f8dceda5b3eaad7f1f767be390056cd # v4.2.0
         with:
