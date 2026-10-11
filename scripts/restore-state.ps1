@@ -89,6 +89,8 @@ try {
           "$env:USERPROFILE\AGENTS.md",
           "$env:USERPROFILE\Documents\DevBox-Notes")
     }
+    # Legacy project/session records have their own user-profile directory.
+    $hotPaths = @($hotPaths) + @(Join-Path $env:USERPROFILE '.local\share\opencode\project')
     foreach ($rawPath in $hotPaths) {
         $target = [Environment]::ExpandEnvironmentVariables([string]$rawPath)
         if (-not $target.StartsWith($env:USERPROFILE + '\', [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -139,6 +141,23 @@ try {
             Copy-Item -LiteralPath $child.FullName -Destination (Join-Path $target $child.Name) -Recurse -Force -ErrorAction Stop
         }
         Write-DevBox OK "Restored saved DevBox $name into the new ephemeral runner."
+    }
+    # Import only the explicitly staged OpenCode SQLite snapshot after
+    # restic finishes and before this runner starts an interactive OpenCode.
+    $dbSnapshots = @(Get-ChildItem -LiteralPath $staging -Recurse -File -Filter 'opencode.db' |
+        Where-Object { $_.FullName -match '[\\/]+PersistentData[\\/]+OpenCodeHistory[\\/]+opencode\.db$' })
+    if ($dbSnapshots.Count -gt 1) {
+        Stop-DevBox 'Ambiguous OpenCode DB snapshots: refusing to import arbitrary history.'
+    }
+    if ($dbSnapshots.Count -eq 1) {
+        $targetDb = Join-Path $env:USERPROFILE '.local\share\opencode\opencode.db'
+        & python (Join-Path $PSScriptRoot 'snapshot-opencode-db.py') $dbSnapshots[0].FullName $targetDb
+        if ($LASTEXITCODE -ne 0) {
+            Stop-DevBox 'OpenCode DB restore/integrity check failed.'
+        }
+        Write-DevBox OK 'Restored consistent OpenCode session history SQLite database.'
+    } else {
+        Write-DevBox INFO 'No saved OpenCode v2 SQLite history in this snapshot.'
     }
 } finally {
     Remove-Item -LiteralPath $staging -Force -Recurse -ErrorAction SilentlyContinue
