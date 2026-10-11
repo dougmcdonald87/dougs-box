@@ -180,6 +180,25 @@ jobs:
           if ((Get-Content -LiteralPath (Join-Path $projectsDir.FullName 'PROJECT-TEST.txt') -Raw).Trim() -ne 'persist me: project') { throw 'Project was NOT restored.' }
           if ((Get-Content -LiteralPath (Join-Path $workspaceDir.FullName 'WORKSPACE-TEST.txt') -Raw).Trim() -ne 'persist me: workspace') { throw 'Workspace was NOT restored.' }
           Write-Output 'WINDOWS RESTIC BACKUP AND REAL WORK RECOVERY: PASS'
+          # Strongest cheap integration attack: STOP must invoke the real restic
+          # save-state.ps1 against this disposable local encrypted repository.
+          . ./scripts/control-queue.ps1
+          $commands = Join-Path $env:DEVBOX_CONTROL_PATH 'Commands'
+          New-Item -ItemType Directory -Path $commands -Force | Out-Null
+          $id = [guid]::NewGuid().ToString('N')
+          Set-Content -LiteralPath (Join-Path $commands "stop-$id.request") -Value 'real-restic-test' -Encoding ascii
+          $stop = Invoke-DevBoxControlRequests -ControlPath $env:DEVBOX_CONTROL_PATH -VerifiedSave {
+            param([string]$action)
+            ./scripts/save-state.ps1
+            return ($LASTEXITCODE -eq 0)
+          }
+          if (-not $stop) { throw 'Real verified Restic snapshot failed to approve STOP.' }
+          $result = Get-Content -LiteralPath (Join-Path $commands "stop-$id.result.json") -Raw | ConvertFrom-Json
+          if (-not $result.success -or -not $result.snapshotId) {
+            throw 'STOP claimed success without a new real Restic snapshot.'
+          }
+          Write-Output 'WINDOWS REAL RESTIC -> SAFE STOP INTEGRATION: PASS'
+
 
   windows-devbox-stages:
     name: Windows stage smoke - Restic, RDP and firewall
