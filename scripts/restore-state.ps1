@@ -1,118 +1,120 @@
-# restore-state.ps1 - Phase 22/21/20. HOT first, Git canonical, small overlay.
-# NEVER destructive: no destructive overwrite stage anywhere, nothing restored with
-# wipe-and-replace semantics. Restore into staging then copy over unchanged targets.
+# restore-state.ps1 — isolated GitHub runner restore.
+# Restores the latest known DevBox snapshot to staging and imports approved
+# HOT configuration. Never writes to Lenovo, HP, Z: or tailnet settings.
 Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot 'common.ps1')
 Write-Step 'restore-state'
 
-$persist = (Get-Content (Join-Path $env:DEVBOX_CONTROL_PATH 'persistence.json') -Raw) | ConvertFrom-Json
-
-# First-run gate: there is nothing to restore until the dedicated DevBox
-# repository has been initialized by save-state -First. Restic documents 10
-# as the repository-missing status. Any other error is a hard failure.
 if ([string]::IsNullOrWhiteSpace($env:RESTIC_PASSWORD)) {
-    Stop-DevBox 'RESTIC_PASSWORD missing at restore.'
+    Stop-DevBox 'RESTIC_PASSWORD missing at restore; no automatic restore permitted.'
 }
-$resticExe = $env:DEVBOX_RESTIC_EXE
-if (-not $resticExe -or -not (Test-Path -LiteralPath $resticExe -PathType Leaf)) {
-    Stop-DevBox 'Restic executable unavailable at restore.'
+$restic = $env:DEVBOX_RESTIC_EXE
+if ([string]::IsNullOrWhiteSpace($restic) -or -not (Test-Path -LiteralPath $restic -PathType Leaf)) {
+    Stop-DevBox 'Restic executable unavailable; run persistence setup first.'
 }
-$probeRepo = [string]$persist.repoUrl
-& $resticExe --repo $probeRepo cat config 2>$null | Out-Null
-$probeExit = $LASTEXITCODE
-if ($probeExit -eq 10) {
-    Write-DevBox INFO 'First run confirmed: dedicated DevBox repository does not exist yet. Nothing to restore.'
+$persistenceFile = Join-Path $env:DEVBOX_CONTROL_PATH 'persistence.json'
+if (-not (Test-Path -LiteralPath $persistenceFile -PathType Leaf)) {
+    Stop-DevBox 'Dedicated DevBox persistence metadata missing.'
+}
+$persist = Get-Content -LiteralPath $persistenceFile -Raw | ConvertFrom-Json
+$repo = [string]$persist.repoUrl
+
+# A brand-new, dedicated repository is initialized only by the first verified
+# backup. A wrong password or unreachable server must NOT masquerade as empty.
+& $restic --repo $repo cat config 2>$null | Out-Null
+$repoStatus = $LASTEXITCODE
+if ($repoStatus -eq 10) {
+    Write-DevBox INFO 'First session: dedicated DevBox repository does not yet exist; restore is not required.'
     exit 0
 }
-if ($probeExit -ne 0) {
-    Stop-DevBox "Cannot check existing repository (restic exit $probeExit). Refusing unsafe automatic restore."
+if ($repoStatus -ne 0) {
+    Stop-DevBox "Restic repository check failed (exit $repoStatus). Verify backup password and storage connection before proceeding."
 }
 
-# password via RESTIC_PASSWORD env (workflow-provided); never printed, never logged
-if ([string]::IsNullOrWhiteSpace($env:RESTIC_PASSWORD)) {
-    Stop-DevBox "RESTIC_PASSWORD empty at restore. Next action: add it to the devbox Environment secrets."
+$rawSnapshots = (& $restic --repo $repo snapshots --json 2>&1 | Out-String)
+$snapshotsStatus = $LASTEXITCODE
+if ($snapshotsStatus -ne 0) {
+    Stop-DevBox "Restic snapshots listing failed (exit $snapshotsStatus)."
 }
-
-$repoUrl = $persist.repoUrl
-
-# ---- password from env into a temp file with tight ACL, removed after each call.
-#      restic prefers RESTIC_PASSWORD_FILE for non-lookup password reading.
-function Invoke-Restic {
-    param([Parameter(Mandatory)][string[]]$ResticArgs)
-    $pwFile = Join-Path $env:DEVBOX_TEMP ('restic-pw-' + [guid]::NewGuid().ToString('N'))
-    $env:RESTIC_PASSWORD | Set-Content -LiteralPath $pwFile -NoNewline -Encoding ascii
-    icacls $pwFile /inheritance:r /grant:r "$env:USERNAME`:R" | Out-Null
-    try {
-        $full = @("--repo", $repoUrl, "--password-file", $pwFile, "--cache-dir", (Join-Path $env:DEVBOX_WSROOT 'ResticCache')) + $ResticArgs
-        & $env:DEVBOX_RESTIC_EXE @full 2>&1 | Write-Output
-        if ($LASTEXITCODE -ne 0) { return $LASTEXITCODE } else { return 0 }
-    } finally {
-        Remove-Item -LiteralPath $pwFile -Force -ErrorAction SilentlyContinue
-    }
+try {
+    $entries = @($rawSnapshots | ConvertFrom-Json -ErrorAction Stop)
+} catch {
+    Stop-DevBox 'Restic snapshots response was not valid JSON.'
 }
-
-# ---- snapshot listing: zero snapshots on first run is NORMAL (Phase 22)
-Invoke-Restic -ResticArgs @("snapshots", "--json") | Set-Content (Join-Path $env:DEVBOX_TEMP 'snaps.json') -Encoding utf8
-if ($LASTEXITCODE -ne 0) { Stop-DevBox "snapshots listing failed (exit $LASTEXITCODE)." }
-$existing = @(Get-Content (Join-Path $env:DEVBOX_TEMP 'snaps.json') -Raw | ConvertFrom-Json -ErrorAction SilentlyContinue)
-
-if ($existing.Count -eq 0) {
-    Write-DevBox OK "first run: no previous snapshot; nothing to restore. Continuing to READY path."
+if ($entries.Count -eq 0) {
+    Write-DevBox INFO 'Initialized DevBox repository contains no snapshots; nothing to restore.'
     exit 0
 }
+$latest = $entries | Sort-Object { [DateTime]::Parse([string]$_.time) } -Descending | Select-Object -First 1
+$snapshotId = [string]$latest.id
+if ([string]::IsNullOrWhiteSpace($snapshotId)) {
+    Stop-DevBox 'Latest snapshot does not contain an ID.'
+}
 
-# ---- HOT restore within budget (Phase 21): cap auto-restore size
-$cfgPath = Join-Path $PSScriptRoot '..\config\devbox.json'
-$cfg = if (Test-Path $cfgPath) { Get-Content $cfgPath -Raw | ConvertFrom-Json } else { $null }
-$autoRestoreMaxGiB = if ($cfg -and $cfg.auto_restore_max_gib) { [double]$cfg.auto_restore_max_gib } else { 3.0 }
-
-$latest = $existing | Sort-Object created -Descending | Select-Object -First 1
-$latestId = $latest.id
-Write-DevBox INFO "latest snapshot $latestId at $($latest.created)"
-
-# ---- archive-size gate for the auto-restore cap (real restic stats output)
-$stats = Invoke-Restic -ResticArgs @("stats", $latestId, "--mode", "archive-size", "--json") | ConvertFrom-Json -ErrorAction SilentlyContinue
-if ($stats -and $stats.total_size) {
-    $giB = $stats.total_size / $OneGiB
-    if ($giB -gt $autoRestoreMaxGiB) {
-        Write-DevBox WARN "snapshot payload $([math]::Round($giB,2)) GiB above auto-restore cap ${autoRestoreMaxGiB} GiB; hydrate on demand instead of pulling it all."
+# Check the total snapshot size before hydrating onto an ephemeral runner.
+$cfgFile = Join-Path $PSScriptRoot '..\config\devbox.json'
+$cfg = if (Test-Path -LiteralPath $cfgFile) { Get-Content -LiteralPath $cfgFile -Raw | ConvertFrom-Json } else { $null }
+$limitGiB = if ($cfg -and $cfg.auto_restore_max_gib) { [double]$cfg.auto_restore_max_gib } else { 3.0 }
+$statsRaw = (& $restic --repo $repo stats $snapshotId --mode archive-size --json 2>&1 | Out-String)
+if ($LASTEXITCODE -ne 0) {
+    Stop-DevBox 'Could not measure snapshot size. Refusing an unbounded automatic restore.'
+}
+try {
+    $stats = $statsRaw | ConvertFrom-Json -ErrorAction Stop
+} catch {
+    Stop-DevBox 'Snapshot size output was malformed. Refusing unbounded restore.'
+}
+if ($null -eq $stats.total_size) {
+    Stop-DevBox 'Snapshot size could not be determined.'
+}
+$sizeGiB = [double]$stats.total_size / 1073741824
+if ($sizeGiB -gt $limitGiB) {
+    Stop-DevBox "Latest snapshot is $([math]::Round($sizeGiB,2)) GiB; above automatic restore cap $limitGiB GiB. Review before restoring."
+}
+$tempDir = Join-Path $env:DEVBOX_WSROOT 'Temp'
+$staging = New-DevboxDirectorySafe (Join-Path $tempDir ('restore-' + [guid]::NewGuid().ToString('N')))
+try {
+    & $restic --repo $repo restore $snapshotId --target $staging | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Stop-DevBox "Snapshot restore into staging failed ($snapshotId)."
     }
-} else {
-    Write-DevBox INFO "stats unavailable for size gate; restoration proceeds to staging regardless (cap check cosmetic)."
-}
 
-# ---- staging restore, then targeted copy (Phase 22: never blind overwrite)
-$staging = New-DevboxDirectorySafe (Join-Path $env:DEVBOX_TEMP 'restore-staging')
-Copy-Item -Path (Join-Path $env:DEVBOX_TEMP 'restore-staging') -Destination '.' -Recurse -Force -ErrorAction SilentlyContinue | Out-Null
-
-$ri = Invoke-Restic -ResticArgs @('restore', $latestId, '--include', '/hot/**', '--target', $staging)
-if ($LASTEXITCODE -ne 0) { Stop-DevBox "restore to staging failed (exit $LASTEXITCODE). Next action: TROUBLESHOOTING 'restore-state'." }
-
-# HOT items from config map: each path gets copied from staging/hot/<prof-relative> if present
-$hotCfg = if ($cfg -and $cfg.hot_paths) { $cfg.hot_paths } else {
-    @("$env:USERPROFILE\.config\opencode", "$env:USERPROFILE\AGENTS.md", "$env:USERPROFILE\Documents\DevBox-Notes")
-}
-foreach ($hot in $hotCfg) {
-    $rel = "$env:USERPROFILE\"
-    if ($hot -like "$rel*") {
-        $tail = $hot.Substring($rel.Length)
-        $src = Join-Path $staging ('hot\' + $tail)
-        if (Test-Path $src) {
-            New-DevboxDirectorySafe (Split-Path $hot) | Out-Null
-            Copy-Item -Path $src -Destination $hot -Recurse -Force
-            Write-DevBox OK "HOT restored: $hot"
-        } else {
-            Write-DevBox INFO "HOT absent from snapshot (first-time item): $hot"
+    # Imported files apply to this new ephemeral GitHub runner only. Restic's
+    # Windows staging layout may include a drive-letter directory.
+    $hotPaths = if ($cfg -and $cfg.hot_paths) { @($cfg.hot_paths) } else {
+        @("$env:USERPROFILE\.config\opencode",
+          "$env:USERPROFILE\AGENTS.md",
+          "$env:USERPROFILE\Documents\DevBox-Notes")
+    }
+    foreach ($rawPath in $hotPaths) {
+        $target = [Environment]::ExpandEnvironmentVariables([string]$rawPath)
+        if (-not $target.StartsWith($env:USERPROFILE + '\', [System.StringComparison]::OrdinalIgnoreCase)) {
+            Write-DevBox WARN 'Ignoring HOT path outside ephemeral runner user profile.'
+            continue
         }
+        $drive = $target.Substring(0,1)
+        $tail = $target.Substring(3)
+        $candidates = @(
+            (Join-Path $staging (Join-Path $drive $tail)),
+            (Join-Path $staging $tail)
+        )
+        $source = $candidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+        if (-not $source) {
+            Write-DevBox INFO "Saved HOT path not found in snapshot: $target"
+            continue
+        }
+        if (Test-Path -LiteralPath $source -PathType Container) {
+            New-DevboxDirectorySafe $target | Out-Null
+            foreach ($child in (Get-ChildItem -LiteralPath $source -Force)) {
+                Copy-Item -LiteralPath $child.FullName -Destination (Join-Path $target $child.Name) -Recurse -Force -ErrorAction Stop
+            }
+        } else {
+            New-DevboxDirectorySafe (Split-Path -Path $target -Parent) | Out-Null
+            Copy-Item -LiteralPath $source -Destination $target -Force -ErrorAction Stop
+        }
+        Write-DevBox OK "HOT state restored into runner: $target"
     }
+} finally {
+    Remove-Item -LiteralPath $staging -Force -Recurse -ErrorAction SilentlyContinue
 }
-
-# ---- PROJECT: Git canonical - clone/fetch in Projects\ (Phase 20 law)
-$projects = Join-Path $env:DEVBOX_WSROOT 'Projects'
-New-DevboxDirectorySafe $projects | Out-Null
-
-# ---- OpenCode auth is explicitly NOT persisted unless owner enablen it (Phase 29)
-Write-DevBox INFO "OpenCode auth persistence: policy flag governs; default false."
-
-Remove-Item -LiteralPath $staging -Recurse -Force -ErrorAction SilentlyContinue
-Write-DevBox OK "restore-state done."
+Write-DevBox OK "Snapshot $snapshotId safely processed for this temporary GitHub runner."
