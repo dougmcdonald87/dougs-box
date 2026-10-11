@@ -1,6 +1,6 @@
 # iPhone Start + verified DevBox Stop — rollout guide
 
-**Status: implementation candidate. Not deployed to `main`, not tested on Doug's iPhone or over live RDP.**
+**Status: tested on isolated CI runners; activation requires merging the PR and launching a NEW DevBox. Not tested on Doug's iPhone or over live RDP.**
 Scope: temporary GitHub-hosted Windows runner only. No changes to Lenovo, HP, RustDesk, Z:, Tailscale tags or permissions.
 
 ## Usage and cost gate — read BEFORE enabling
