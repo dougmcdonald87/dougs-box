@@ -13,6 +13,7 @@ import urllib.error
 import urllib.request
 
 WORKFLOW = "devbox.yml"
+AUDIT_RUN_TITLE = "DevBox Archive Audit (Read Only)"
 PAGE_SIZE = 100
 MAX_PAGES = 10
 
@@ -33,6 +34,10 @@ def is_prior_conflict(prior, this_id, this_created):
     Prior runs that overlap the current workflow's creation are duplicates,
     even when they finished while this Windows job was waiting in the queue.
     """
+    # A read-only audit uses the same OIDC-authorized workflow path but
+    # has NO interactive DevBox. Never mistake it for a duplicate session.
+    if prior.get("display_title") == AUDIT_RUN_TITLE:
+        return False
     identifier = int(prior["id"])
     if identifier >= this_id:
         return False

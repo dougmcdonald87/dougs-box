@@ -3,8 +3,19 @@ name: DevBox
 # MANUAL ONLY. V3 law: no push/PR/schedule triggers, no chaining.
 # Owner launches this from Actions; approve the `devbox` Environment when asked.
 # Cancel is EMERGENCY only - normal shutdown is "Finish DevBox Safely" on the desktop.
+run-name: ${{ inputs.operation == 'inspect' && 'DevBox Archive Audit (Read Only)' || 'DevBox' }}
+
 on:
   workflow_dispatch:
+    inputs:
+      operation:
+        description: 'Start remote desktop, or inspect old OpenCode backup metadata without changing any files'
+        required: true
+        type: choice
+        default: start
+        options:
+          - start
+          - inspect
 
 permissions:
   contents: read
@@ -25,6 +36,7 @@ env:
 
 jobs:
   preflight:
+    if: ${{ inputs.operation != 'inspect' }}
     name: Preflight - resolve tested runner label
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -64,6 +76,7 @@ jobs:
           esac
 
   devbox:
+    if: ${{ inputs.operation != 'inspect' }}
     name: DevBox session (${{ needs.preflight.outputs.label }})
     needs: preflight
     runs-on: ${{ needs.preflight.outputs.label }}
@@ -166,3 +179,52 @@ jobs:
           RESTIC_REST_USERNAME: devbox
           RESTIC_REST_PASSWORD: ${{ secrets.DEVBOX_STORAGE_PASSWORD }}
         run: ./scripts/session-manager.ps1 -JobStart
+
+
+  audit:
+    # Tailscale's existing trust credential checks workflow_ref, which is
+    # .github/workflows/devbox.yml@refs/heads/main. A separate diagnostic
+    # workflow is unauthorized (observed HTTP 403 in run #38182979676).
+    if: ${{ inputs.operation == 'inspect' }}
+    name: Read-only OpenCode snapshot inventory
+    runs-on: windows-2025-vs2026
+    environment: devbox
+    timeout-minutes: 15
+    steps:
+      - name: Checkout metadata-only inspector
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - name: Verify original workflow OIDC identity before Tailnet join
+        shell: pwsh
+        env:
+          TS_OAUTH_CLIENT_ID: ${{ env.DEVBOX_OIDC_CLIENT_ID }}
+          TS_AUDIENCE: ${{ format('api.tailscale.com/{0}', env.DEVBOX_OIDC_CLIENT_ID) }}
+        run: ./scripts/check-tailscale-oidc.ps1
+
+      - name: Join tailnet for read-only inventory only
+        uses: tailscale/github-action@d1b6cd204f8dceda5b3eaad7f1f767be390056cd # v4.2.0
+        with:
+          oauth-client-id: ${{ env.DEVBOX_OIDC_CLIENT_ID }}
+          audience: ${{ format('api.tailscale.com/{0}', env.DEVBOX_OIDC_CLIENT_ID) }}
+          tags: tag:github-devbox
+          version: latest
+          hostname: devbox-audit-${{ github.run_id }}
+
+      - name: Inspect encrypted snapshot METADATA ONLY (never restore)
+        shell: pwsh
+        env:
+          RESTIC_PASSWORD: ${{ secrets.RESTIC_PASSWORD }}
+          RESTIC_REST_USERNAME: devbox
+          RESTIC_REST_PASSWORD: ${{ secrets.DEVBOX_STORAGE_PASSWORD }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:DEVBOX_WSROOT = Join-Path $env:RUNNER_TEMP 'ResticReadOnlyAudit'
+          $env:DEVBOX_CONTROL_PATH = Join-Path $env:DEVBOX_WSROOT 'Control'
+          New-Item -ItemType Directory -Path $env:DEVBOX_CONTROL_PATH -Force | Out-Null
+          $tools = Join-Path $env:DEVBOX_WSROOT 'Tools\restic'
+          ./scripts/install-restic.ps1 -ToolsRoot $tools
+          $exe = Join-Path $tools 'restic.exe'
+          python ./scripts/inspect-opencode-snapshots.py --restic-exe $exe --max-prior 30
+          if ($LASTEXITCODE -ne 0) { throw 'Restic metadata inspection failed; no backup-content conclusions.' }
