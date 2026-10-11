@@ -3,6 +3,7 @@
 # HOT configuration. Never writes to Lenovo, HP, Z: or tailnet settings.
 Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot 'common.ps1')
+. (Join-Path $PSScriptRoot 'find-staged-work.ps1')
 Write-Step 'restore-state'
 
 if ([string]::IsNullOrWhiteSpace($env:RESTIC_PASSWORD)) {
@@ -125,14 +126,14 @@ try {
     # Stage first, then copy into the new runner workspace only.
     foreach ($name in @('Projects', 'Workspace')) {
         $target = Join-Path $env:DEVBOX_WSROOT $name
-        $driveLetter = $target.Substring(0, 1)
-        $tail = $target.Substring(3)
-        $candidates = @(
-            (Join-Path $staging (Join-Path $driveLetter $tail)),
-            (Join-Path $staging $tail)
-        )
-        $source = $candidates | Where-Object { Test-Path -LiteralPath $_ -PathType Container } | Select-Object -First 1
+        $source = Find-DevBoxStagedWork -StagingRoot $staging -Name $name -SnapshotPaths @($latest.paths)
         if (-not $source) {
+            # Snapshot manifest claims this root; a missing staged directory
+            # means the requested restore FAILED, not an empty workspace.
+            $listed = @($latest.paths | Where-Object { [string]$_ -match ('[\\/]' + [regex]::Escape($name) + '$') })
+            if ($listed.Count -gt 0) {
+                Stop-DevBox "Snapshot lists $name but staged data was not located. Refusing silent data loss."
+            }
             Write-DevBox WARN "Snapshot did not contain saved $name directory; older canary-only snapshot is possible."
             continue
         }

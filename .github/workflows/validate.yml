@@ -58,6 +58,10 @@ jobs:
         shell: bash
         run: python3 tests/guard-one-session.tests.py
 
+      - name: Adversarial staged cross-drive restore tests
+        shell: pwsh
+        run: ./tests/cross-drive.tests.ps1
+
       - name: Adversarial SQLite history snapshot consistency
         shell: bash
         run: python3 tests/opencode-history.tests.py
@@ -228,6 +232,20 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'OpenCode session row missing or database corrupted.' }
           if (Test-Path -LiteralPath (Join-Path (Split-Path $env:OPENCODE_CI_DB -Parent) 'auth.json')) { throw 'OpenCode auth.json was persisted against policy.' }
           Write-Output 'WINDOWS OPENCODE HISTORY RESTORE WITHOUT AUTH: PASS'
+          # Isolated Windows real-files test: the previous runner's D:\DevBox
+          # stage must be findable even when the current runner's root differs.
+          $differentDriveStage = Join-Path $env:RUNNER_TEMP 'DevBox-Former-Drive-Stage'
+          New-Item -ItemType Directory -Path (Join-Path $differentDriveStage 'D\DevBox\Projects') -Force | Out-Null
+          Set-Content -LiteralPath (Join-Path $differentDriveStage 'D\DevBox\Projects\DRIVE-SWITCH-PROOF.txt') -Value 'previous-D-drive'
+          . ./scripts/find-staged-work.ps1
+          $foundOld = Find-DevBoxStagedWork -StagingRoot $differentDriveStage -Name Projects -SnapshotPaths @('D:\DevBox\Projects')
+          if (-not $foundOld) { throw 'Previous D drive Projects were not located.' }
+          $restoredProof = Join-Path $env:DEVBOX_WSROOT 'Projects\DRIVE-SWITCH-PROOF.txt'
+          Copy-Item -LiteralPath (Join-Path $foundOld 'DRIVE-SWITCH-PROOF.txt') -Destination $restoredProof -Force
+          if ((Get-Content -LiteralPath $restoredProof -Raw).Trim() -ne 'previous-D-drive') {
+            throw 'Cross-drive project content mismatch.'
+          }
+          Write-Output 'WINDOWS CROSS-DRIVE STAGING INTEGRATION: PASS'
           if ((Get-Content -LiteralPath (Join-Path $projectsDir.FullName 'PROJECT-TEST.txt') -Raw).Trim() -ne 'persist me: project') { throw 'Project was NOT restored.' }
           if ((Get-Content -LiteralPath (Join-Path $workspaceDir.FullName 'WORKSPACE-TEST.txt') -Raw).Trim() -ne 'persist me: workspace') { throw 'Workspace was NOT restored.' }
           Write-Output 'WINDOWS RESTIC BACKUP AND REAL WORK RECOVERY: PASS'
