@@ -1,82 +1,92 @@
-# session-manager.ps1 - Phase 31/32/33/34. Heartbeat, safe deadline, backup
-# schedule, disk monitor, tailnet path awareness. No busy loop (60s cadence,
-# small writes). Runs detached from the workflow process.
+# session-manager.ps1 — keep the one GitHub Actions job alive after readiness.
+# No laptop, existing Tailscale policy, mapped drive, or RustDesk configuration
+# is modified by this script.
 param([switch]$JobStart)
 Set-StrictMode -Version Latest
-
 . (Join-Path $PSScriptRoot 'common.ps1')
 
 if (-not $JobStart) {
-    Write-Output 'session-manager: pass -JobStart to run the loop as a background worker.'
-    exit 0
+    Write-Output 'Session manager requires -JobStart.'
+    exit 2
 }
-
 Write-Step 'session-manager'
 
-$session = Get-Content (Join-Path $env:DEVBOX_CONTROL_PATH 'session.json') -Raw | ConvertFrom-Json
-$persistPath = Join-Path $env:DEVBOX_CONTROL_PATH 'persistence.json'
-$hasPersist = Test-Path $persistPath
+$sessionFile = Join-Path $env:DEVBOX_CONTROL_PATH 'session.json'
+if (-not (Test-Path -LiteralPath $sessionFile)) {
+    Stop-DevBox 'session.json absent after bootstrap.'
+}
+$session = Get-Content -LiteralPath $sessionFile -Raw | ConvertFrom-Json
+$sessionStart = [DateTime]::Parse($session.startedUtc).ToUniversalTime()
+$deadline = $sessionStart.AddMinutes([double]$session.readyTargetMinutes)
+$forceStop = $sessionStart.AddMinutes(([double]$session.jobHardLimitMinutes) - 15)
+$backupEvery = [TimeSpan]::FromMinutes([double]$session.backupIntervalMin)
+$heartbeatFile = Join-Path $env:DEVBOX_CONTROL_PATH 'heartbeat.json'
+$lastBackupFile = Join-Path $env:DEVBOX_CONTROL_PATH 'last-backup.json'
 
-# ---- session maths (Phase 32): deadline = JobStart + readyTarget, hard stop at job timeout minus reserve
-$sessionStart     = [DateTime]::Parse($session.startedUtc, [CultureInfo]::InvariantCulture, [DateTimeStyles]::RoundtripKind)
-$readyTarget      = New-TimeSpan -Minutes ([int]$session.readyTargetMinutes)
-$deadline         = $sessionStart.Add($readyTarget)
-$hardLimit        = New-TimeSpan -Minutes ([int]$session.jobHardLimitMinutes)
-$backupEvery      = New-TimeSpan -Minutes ([int]$session.backupIntervalMin)
+function Write-Heartbeat {
+    $utcNow = [DateTime]::UtcNow
+    [ordered]@{
+        utc = $utcNow.ToString('o')
+        status = 'running'
+        minutesRemaining = [math]::Max(0, [math]::Floor(($deadline - $utcNow).TotalMinutes))
+    } | ConvertTo-Json -Compress |
+        Set-Content -LiteralPath $heartbeatFile -Encoding utf8
+}
+function Invoke-VerifiedSave {
+    param([string]$Reason)
+    $saveScript = Join-Path $PSScriptRoot 'save-state.ps1'
+    Write-DevBox INFO "Starting $Reason save."
+    & $saveScript
+    if ($LASTEXITCODE -ne 0) {
+        Write-DevBox WARN "$Reason backup failed. Check the job log and do not assume work was saved."
+        return $false
+    }
+    Write-DevBox OK "$Reason backup step exited 0."
+    return $true
+}
 
-# ---- heartbeat loop; 60-second cadence; tiny writes; no busy loop (Phase 31)
-$cwd = Get-Location
+if ([DateTime]::UtcNow -ge $deadline) {
+    Stop-DevBox 'Session startup used its time budget; refusing false READY.'
+}
+if ([string]::IsNullOrWhiteSpace($env:RESTIC_PASSWORD)) {
+    Stop-DevBox 'Session manager has no backup password; cannot promise periodic saves.'
+}
+# Health-check must see a real, current heartbeat before declaring readiness.
+Write-Heartbeat
+& (Join-Path $PSScriptRoot 'health-check.ps1')
+if ($LASTEXITCODE -ne 0) {
+    Stop-DevBox 'Session health check failed. DEVBOX READY was not announced.'
+}
+& (Join-Path $PSScriptRoot 'health-check.ps1') -SummaryOnly
+Write-DevBox OK 'DEVBOX READY — interactive session now held open by the active Actions job.'
+
 while ($true) {
     Start-Sleep -Seconds 60
-    $now = Get-Date
-    $elapsed = $now - $sessionStart
-    $remaining = $deadline - $now
+    Write-Heartbeat
+    $now = [DateTime]::UtcNow
 
-    # ---- heartbeat (public-safe fields)
-    $freeGiB = 0
-    try {
-        $null = $elapsed
-    $driveLetter = if ($env:DEVBOX_WSROOT) { $env:DEVBOX_WSROOT.SubString(0, 2) } else { $session.workspaceRoot.SubString(0, 2) }
-        $drive = Get-PSDrive -Name $driveLetter[0] -ErrorAction SilentlyContinue
-        $freeGiB = [math]::Round($drive.Free / $OneGiB, 2)
-    } catch { $freeGiB = -1 }
-
-    # ---- disk monitor (Phase 34)
-    if ($freeGiB -ge 0) {
-        if ($freeGiB -le [double]$session.diskCritFreeGiB) {
-            Write-DevBox WARN "DISK CRITICAL at $freeGiB GiB. Hydration suspended; disposable dirs named in TROUBLESHOOTING; NO user data deleted automatically."
-        } elseif ($freeGiB -le [double]$session.diskWarnFreeGiB) {
-            Write-DevBox WARN "disk below warning at $freeGiB GiB."
+    if ($now -ge $deadline -or $now -ge $forceStop) {
+        Write-DevBox WARN 'Session deadline reached. Attempting final backup before the runner closes.'
+        $saved = Invoke-VerifiedSave -Reason 'Final'
+        if (-not $saved) {
+            Write-DevBox FAIL 'Final save failed; recover earlier verified snapshot if needed.'
+            exit 2
         }
-    }
-
-    # ---- backup scheduler: periodic saves; skip if persistence offline
-    $lastSave = Join-Path $env:DEVBOX_CONTROL_PATH 'last-backup.json'
-    $lastUtc = if (Test-Path $lastSave) { [DateTime]::Parse((Get-Content $lastSave -Raw | ConvertFrom-Json).utc) } else { $sessionStart.AddMinutes(-1) }
-    $sinceLast = $now - $lastUtc
-    if ($hasPersist -and $sinceLast -gt $backupEvery) {
-        try {
-            & pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'save-state.ps1') 2>&1 |
-                Out-File (Join-Path $env:DEVBOX_LOGS_PATH 'save-state-periodic.log') -Encoding utf8 -Append -ErrorAction SilentlyContinue
-        } catch {
-            Write-DevBox WARN "periodic save failed: $($_.Exception.Message)"
-        }
-    }
-
-    # ---- safe deadline: write sentinel past which finishing is unsafe
-    if ($remaining -le (New-TimeSpan -Minutes 10)) {
-        Set-Content -LiteralPath (Join-Path $env:DEVBOX_CONTROL_PATH 'finish-now-sentinel.txt') `
-            -Value 'deadline closing; owner must run Finish DevBox Safely NOW' -Encoding utf8
-    }
-
-    if ($elapsed -ge $hardLimit.Subtract([TimeSpan]::FromMinutes(15))) {
-        Write-DevBox WARN "approaching GitHub hard limit; forced-save path triggered."
-        if ($hasPersist) {
-            & pwsh -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'save-state.ps1') 2>&1 |
-                Out-File (Join-Path $env:DEVBOX_LOGS_PATH 'save-state-final-attempt.log') -Encoding utf8 -ErrorAction SilentlyContinue
-        }
-        Set-Content -LiteralPath (Join-Path $env:DEVBOX_CONTROL_PATH 'session-deadline-met.txt') `
-            -Value 'hard-limit window entered; session must end' -Encoding utf8
+        Write-DevBox OK 'Final verified backup succeeded. Closing the session cleanly.'
         exit 0
+    }
+
+    $previous = if (Test-Path -LiteralPath $lastBackupFile) {
+        try {
+            [DateTime]::Parse((Get-Content -LiteralPath $lastBackupFile -Raw | ConvertFrom-Json).utc).ToUniversalTime()
+        } catch { $sessionStart.AddMinutes(-1) }
+    } else { $sessionStart.AddMinutes(-1) }
+
+    if (($now - $previous) -ge $backupEvery) {
+        $null = Invoke-VerifiedSave -Reason 'Periodic'
+    }
+
+    if (($deadline - $now).TotalMinutes -le 10) {
+        Set-Content -LiteralPath (Join-Path $env:DEVBOX_CONTROL_PATH 'finish-now-sentinel.txt') -Value 'Session deadline approaching. Finish work now.' -Encoding utf8
     }
 }

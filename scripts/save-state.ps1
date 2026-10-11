@@ -1,130 +1,116 @@
-# save-state.ps1 - Phase 23/24/18. Append-only backup with canary restore proof.
-# ABSOLUTE LAW: this script and its callers contain NO destructive commands.
-# The DevBox backs up; it NEVER deletes, NEVER rewrites repository history.
+# save-state.ps1 — Save a verified restic snapshot of the DevBox workspace.
+# Acts ONLY inside the new GitHub runner and the dedicated DevBox restic repo.
+# Never touches the Lenovo Z: share, existing OpenCode servers, or Tailscale config.
 param([switch]$First)
 Set-StrictMode -Version Latest
-
 . (Join-Path $PSScriptRoot 'common.ps1')
 Write-Step 'save-state'
-if ($env:DEVBOX_WSROOT) {
-    Write-DevBox INFO "workspace: $env:DEVBOX_WSROOT"
-}
-
-$cfgPath = Join-Path $PSScriptRoot '..\config\devbox.json'
-$cfg = if (Test-Path $cfgPath) { Get-Content $cfgPath -Raw | ConvertFrom-Json } else { $null }
-$persist = (Get-Content (Join-Path $env:DEVBOX_CONTROL_PATH 'persistence.json') -Raw) | ConvertFrom-Json
-$repoUrl = $persist.repoUrl
 
 if ([string]::IsNullOrWhiteSpace($env:RESTIC_PASSWORD)) {
-    Stop-DevBox "RESTIC_PASSWORD empty at save. Next action: add it to the devbox Environment secrets."
+    Stop-DevBox 'RESTIC_PASSWORD is missing; refuse to create an unverified backup.'
+}
+if (-not (Test-Path -LiteralPath $env:DEVBOX_RESTIC_EXE -PathType Leaf)) {
+    Stop-DevBox 'Restic binary missing; persistence setup must complete first.'
+}
+$stateFile = Join-Path $env:DEVBOX_CONTROL_PATH 'persistence.json'
+if (-not (Test-Path -LiteralPath $stateFile)) {
+    Stop-DevBox 'persistence.json missing; storage connection must complete first.'
+}
+$state = Get-Content -LiteralPath $stateFile -Raw | ConvertFrom-Json
+$repo = [string]$state.repoUrl
+$restic = [string]$env:DEVBOX_RESTIC_EXE
+if (-not $repo.StartsWith('rest:http://100.')) {
+    Stop-DevBox 'Refusing backup: repository URL is not an expected Tailscale-only rest-server endpoint.'
 }
 
-# ---- HOT set (Phase 20). OpenCode auth only when the owner flag says so (Phase 29)
-$persistOpencodeAuth = if ($cfg -and $cfg.persist_opencode_auth) { [bool]$cfg.persist_opencode_auth } else { $false }
-$hotPaths = if ($cfg -and $cfg.hot_paths) { $cfg.hot_paths } else {
-    @("$env:USERPROFILE\.config\opencode", "$env:USERPROFILE\AGENTS.md", "$env:USERPROFILE\Documents\DevBox-Notes")
-}
-$backupRoots = @()
-foreach ($p in $hotPaths) {
-    if (Test-Path $p) {
-        if (($p -like '*opencode*') -and -not $persistOpencodeAuth) {
-            # back up config but EXCLUDE auth state files explicitly rather than the whole directory (Phase 29)
-            $authExclude = @('--exclude', '*.auth*','--exclude','auth.json','--exclude','opencode.auth*')
-            $backupRoots += $p; $script:AuthArgs = $authExclude
-            continue
-        }
-        $backupRoots += $p
+# Restic natively supports RESTIC_PASSWORD from the process environment.
+# Do not copy passwords to temp files, output or persistent config.
+& $restic --repo $repo cat config | Out-Null
+$repoStatus = $LASTEXITCODE
+if ($repoStatus -eq 10) {
+    if (-not $First) {
+        Stop-DevBox 'Repository does not exist on a periodic save; refuse automatic init.'
     }
+    Write-DevBox INFO 'Dedicated DevBox repository missing; initialize it once.'
+    & $restic --repo $repo init | Out-Null
+    if ($LASTEXITCODE -ne 0) { Stop-DevBox 'restic init failed; no backup claimed.' }
+} elseif ($repoStatus -ne 0) {
+    Stop-DevBox "Cannot open repository (restic exit $repoStatus). Password, permissions, network or repository may be incorrect."
 }
-if ($backupRoots.Count -eq 0) { Write-DevBox WARN 'no HOT paths exist yet; snapshot will contain canary only.' }
 
-# ---- canary (Phase 24): proves RESTORE, not merely upload
 $canaryDir = New-DevboxDirectorySafe (Join-Path $env:DEVBOX_WSROOT 'PersistentData\canary')
-$canaryBody = "DEVBOX-CANARY $(Get-Date -Format 'o') run $($env:GITHUB_RUN_ID) user $(whoami)"
-Set-Content -LiteralPath (Join-Path $canaryDir 'DEVBOX-CANARY.txt') -Value $canaryBody -Encoding utf8
-$canaryLocalHash = (Get-FileHash (Join-Path $canaryDir 'DEVBOX-CANARY.txt') -Algorithm SHA256).Hash
+$canaryFile = Join-Path $canaryDir 'DEVBOX-CANARY.txt'
+$canaryText = "DEVBOX-CANARY $([DateTime]::UtcNow.ToString('o')) run $env:GITHUB_RUN_ID"
+Set-Content -LiteralPath $canaryFile -Value $canaryText -Encoding utf8
+$expectedHash = (Get-FileHash -LiteralPath $canaryFile -Algorithm SHA256).Hash
 
-# ---- password discipline: env into temp file, deleted after each invocation
-function Invoke-Restic {
-    param([Parameter(Mandatory)][string[]]$ResticArgs)
-    $pwFile = Join-Path $env:DEVBOX_WSROOT ('Temp\restic-pw-' + [guid]::NewGuid().ToString('N'))
-    $env:RESTIC_PASSWORD | Set-Content -LiteralPath $pwFile -NoNewline -Encoding ascii
-    icacls $pwFile /inheritance:r /grant:r "$env:USERNAME`:R" | Out-Null
+# Explicitly include the canary. The original script created it but never
+# added its directory to the backup command.
+$roots = @($canaryDir)
+$configFile = Join-Path $PSScriptRoot '..\config\devbox.json'
+$config = if (Test-Path -LiteralPath $configFile) { Get-Content -LiteralPath $configFile -Raw | ConvertFrom-Json } else { $null }
+$hot = if ($config -and $config.hot_paths) { @($config.hot_paths) } else {
+    @("$env:USERPROFILE\.config\opencode",
+      "$env:USERPROFILE\AGENTS.md",
+      "$env:USERPROFILE\Documents\DevBox-Notes")
+}
+foreach ($p in $hot) {
+    $expanded = [Environment]::ExpandEnvironmentVariables([string]$p)
+    if ((Test-Path -LiteralPath $expanded) -and ($roots -notcontains $expanded)) {
+        $roots += $expanded
+    }
+}
+
+$excludes = @()
+if (-not ($config -and $config.persist_opencode_auth)) {
+    $excludes = @('--exclude', 'auth.json', '--exclude', '*.auth*', '--exclude', 'opencode.auth*')
+}
+
+# Restic backup syntax and JSON field names verified against upstream docs.
+$lines = @(& $restic --repo $repo --json backup --tag 'devbox-auto' @excludes @roots 2>&1)
+$backupStatus = $LASTEXITCODE
+if ($backupStatus -ne 0) {
+    Stop-DevBox "Restic backup failed (exit $backupStatus). A successful snapshot was not proven."
+}
+$summary = $null
+foreach ($line in $lines) {
     try {
-        $full = @('--repo', $repoUrl, '--password-file', $pwFile, '--cache-dir', (Join-Path $env:DEVBOX_WSROOT 'ResticCache')) + $ResticArgs
-        & $env:DEVBOX_RESTIC_EXE @full 2>&1 | Write-Output
-        return $LASTEXITCODE
-    } finally {
-        Remove-Item -LiteralPath $pwFile -Force -ErrorAction SilentlyContinue
+        $obj = ([string]$line) | ConvertFrom-Json -ErrorAction Stop
+        if ($obj.message_type -eq 'summary') { $summary = $obj }
+    } catch {
+        # Ignore non-JSON progress text; rely on a valid final summary below.
     }
 }
-
-# ---- first run: initialize the repo EXACTLY ONCE (Phase 19)
-if ($First) {
-    $probe = Invoke-Restic -ResticArgs @('snapshots', '--json')
-    if ($probe -eq 0) {
-        Write-DevBox OK "repository already initialized; once-only law prevents re-init."
-    } elseif ($probe -eq 10) {
-        # restic exit 10: repository does not exist. Safe to init precisely once.
-        $initRes = Invoke-Restic -ResticArgs @('init')
-        if ($initRes -ne 0) { Stop-DevBox "restic init failed (exit $initRes) on empty repository. Next action: TROUBLESHOOTING 'connect-persistence'." }
-        Write-DevBox OK "repository initialized exactly once."
-    } else {
-        Stop-DevBox "repository state AMBIGUOUS (exit $probe). Next action: inspect storage host before any retry; refuse to initialize blindly (Phase 19)."
-    }
+if (-not $summary -or [string]::IsNullOrWhiteSpace([string]$summary.snapshot_id)) {
+    Stop-DevBox 'Backup returned success but no JSON summary with snapshot_id was found; snapshot unproven.'
+}
+$snapshotId = [string]$summary.snapshot_id
+$snapshotsText = (& $restic --repo $repo snapshots --json 2>&1 | Out-String)
+$listStatus = $LASTEXITCODE
+if ($listStatus -ne 0) { Stop-DevBox "Snapshot verification failed (exit $listStatus)." }
+$snapshots = @($snapshotsText | ConvertFrom-Json)
+if (-not @($snapshots | Where-Object { $_.id -eq $snapshotId }).Count) {
+    Stop-DevBox "Snapshot $snapshotId not found in restic snapshots listing."
 }
 
-# ---- the backup itself (--skip-if-unchanged where supported; never a destructive flag)
-$args = @('--tag', 'devbox-auto', '--json')
-if ($First) { $args += @('--host', 'devbox') }
-$args += $backupRoots
-if ($script:AuthArgs) { $args += $script:AuthArgs }
-
-Write-DevBox INFO "backup: $($backupRoots -join ', ')"
-$out = Invoke-Restic -ResticArgs $args
-if ($LASTEXITCODE -ne 0) { Stop-DevBox "restic backup FAILED (exit $LASTEXITCODE). Snapshot ID unknown - NEVER report success (Phase 23)." }
-
-$summary = ($out | Select-Object -Last 8) | ConvertFrom-Json -ErrorAction SilentlyContinue | Where-Object { $_.snapshot }
-if (-not $summary) {
-    # parse the last JSON object from the summary lines
-    $jsonLines = @($out | Where-Object { $_.Trim().StartsWith('{') })
-    if ($jsonLines.Count -gt 0) { $summary = $jsonLines[-1] | ConvertFrom-Json }
+# Canary recovery proof: recover only the canary, never a whole working tree.
+$tempRoot = New-DevboxDirectorySafe (Join-Path $env:DEVBOX_WSROOT 'Temp')
+$restoreTarget = New-DevboxDirectorySafe (Join-Path $tempRoot ('canary-verify-' + [guid]::NewGuid().ToString('N')))
+try {
+    & $restic --repo $repo restore $snapshotId --include '**/DEVBOX-CANARY.txt' --target $restoreTarget | Out-Null
+    $restoreStatus = $LASTEXITCODE
+    if ($restoreStatus -ne 0) { Stop-DevBox "Canary restore failed (exit $restoreStatus)." }
+    $matches = @(Get-ChildItem -LiteralPath $restoreTarget -Recurse -File -Filter 'DEVBOX-CANARY.txt' -ErrorAction SilentlyContinue)
+    if ($matches.Count -ne 1) { Stop-DevBox 'Canary verification failed: exactly one recovered canary required.' }
+    $actualHash = (Get-FileHash -LiteralPath $matches[0].FullName -Algorithm SHA256).Hash
+    if ($actualHash -ne $expectedHash) { Stop-DevBox 'Canary checksum mismatch; backup is not verified.' }
+} finally {
+    Remove-Item -LiteralPath $restoreTarget -Recurse -Force -ErrorAction SilentlyContinue
 }
-$snapshotId = if ($summary -and $summary.snapshot) { $summary.snapshot } else { $null }
-if ([string]::IsNullOrEmpty($snapshotId)) { Stop-DevBox "backup exited 0 but no snapshot id parsed. Next action: rerun save-state once before claiming saved." }
-
-# ---- verify the snapshot exists in listings (Phase 23 requirement)
-$verify = Invoke-Restic -ResticArgs @('snapshots', '--json') | ConvertFrom-Json -ErrorAction SilentlyContinue
-$found = $verify | Where-Object { $_.id -eq $snapshotId }
-if (-not $found) { Stop-DevBox "snapshot $snapshotId missing from repository listing after backup. Next action: TROUBLESHOOTING 'save-state'." }
-
-# ---- canary restore proof (Phase 24): include canary, restore to temp, hash equal
-$restoreTarget = New-DevboxDirectorySafe (Join-Path $env:DEVBOX_WSROOT 'Temp\canary-restore-' + [string](Get-Date -Format 'yyyyMMddHHmmss'))
-$canaryRes = Invoke-Restic -ResticArgs @('restore', $snapshotId, '--include', '/canary/*', '--target', $restoreTarget)
-if ($canaryRes -ne 0) { Stop-DevBox "canary restore failed (exit $canaryRes). Next action: TROUBLESHOOTING 'save-state'." }
-
-$canaryRestored = Get-ChildItem -LiteralPath $restoreTarget -Recurse -Filter 'DEVBOX-CANARY.txt' | Select-Object -First 1
-if (-not $canaryRestored) { Stop-DevBox "canary file absent from restore. Next action: inspect snapshot contents with restic ls." }
-$canaryRemoteHash = (Get-FileHash $canaryRestored.FullName -Algorithm SHA256).Hash
-
-if ($canaryRemoteHash -ne $canaryLocalHash) {
-    Stop-DevBox "canary hash MISMATCH (local $canaryLocalHash vs restored $canaryRemoteHash). Next action: treat storage integrity as suspect; inspect storage host."
-}
-Write-DevBox OK "canary round-trip verified."
-
-# ---- bookkeeping, then clean the temp restore
-@{
+[ordered]@{
     snapshotId = $snapshotId
-    utc        = (Get-Date).ToUniversalTime().ToString('o')
-    hotCount   = $backupRoots.Count
-    canaryHash = $canaryLocalHash
-} | ConvertTo-Json -Compress |
-    Set-Content (Join-Path $env:DEVBOX_CONTROL_PATH 'last-backup.json') -Encoding utf8
-
-Remove-Item -LiteralPath $restoreTarget -Recurse -Force -ErrorAction SilentlyContinue
-Write-StepSummary @(
-    "**Backup saved**: snapshot $($snapshotId)",
-    "**Canary**: round-trip hash verified",
-    "**HOT paths**: $($backupRoots.Count)"
-)
-Write-DevBox OK "save-state complete ($snapshotId)."
+    utc = [DateTime]::UtcNow.ToString('o')
+    canaryHash = $expectedHash
+    rootCount = $roots.Count
+} | ConvertTo-Json -Compress | Set-Content -LiteralPath (Join-Path $env:DEVBOX_CONTROL_PATH 'last-backup.json') -Encoding utf8
+Write-DevBox OK "Verified backup $snapshotId (snapshot listed and canary restored with matching SHA256)."

@@ -58,6 +58,21 @@ $env:DEVBOX_RESTORE_MAXGB = "$autoRestoreMaxGiB"
 $env:DEVBOX_READY_MIN     = "$readyTargetMinutes"
 $env:DEVBOX_WARN_GIB      = "$warnGiB"
 $env:DEVBOX_CRIT_GIB      = "$critGiB"
+$env:DEVBOX_TEMP         = (Join-Path $wsRoot 'Temp')
+
+# GitHub Actions executes each shell step in a new process. Persist the
+# workspace environment for the next steps instead of relying on local $env.
+if ($env:GITHUB_ENV) {
+    foreach ($key in @(
+        'DEVBOX_FAST_ROOT', 'DEVBOX_WSROOT', 'DEVBOX_CONTROL_PATH',
+        'DEVBOX_LOGS_PATH', 'DEVBOX_REQUIRE_GIB', 'DEVBOX_BACKUP_MIN',
+        'DEVBOX_RESTORE_MAXGB', 'DEVBOX_READY_MIN', 'DEVBOX_WARN_GIB',
+        'DEVBOX_CRIT_GIB', 'DEVBOX_TEMP'
+    )) {
+        "$key=$([Environment]::GetEnvironmentVariable($key, 'Process'))" |
+            Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+    }
+}
 
 # ---- knobs for session-manager / health-check (NO secrets in this file)
 [ordered]@{
