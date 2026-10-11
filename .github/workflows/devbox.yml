@@ -70,7 +70,7 @@ jobs:
         uses: tailscale/github-action@d1b6cd204f8dceda5b3eaad7f1f767be390056cd # v4.2.0
         with:
           oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
-          oauth-secret: ${{ secrets.TS_AUDIENCE }}
+          audience: ${{ secrets.TS_AUDIENCE }}
           tags: tag:github-devbox
           version: stable
           hostname: devbox-${{ github.run_id }}
