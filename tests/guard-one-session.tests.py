@@ -34,6 +34,21 @@ class AdmissionTests(unittest.TestCase):
             run(10, "completed", updated="2026-10-11T22:00:00Z")
         ], 11, clock))
 
+    def test_audit_run_never_blocks_original_desktop(self):
+        a = run(10, "in_progress")
+        a["display_title"] = guard.AUDIT_RUN_TITLE
+        self.assertFalse(guard.check_runs([a], 11, clock))
+
+    def test_completed_audit_during_launch_does_not_poison_start(self):
+        a = run(10, "completed", updated="2026-10-11T22:00:00Z")
+        a["display_title"] = guard.AUDIT_RUN_TITLE
+        self.assertFalse(guard.check_runs([a], 11, clock))
+
+    def test_regular_run_with_similar_name_still_blocks(self):
+        a = run(10, "in_progress")
+        a["display_title"] = "DevBox Archive Audit (Read Only) fake"
+        self.assertTrue(guard.check_runs([a], 11, clock))
+
     def test_newer_runs_do_not_cancel_older(self):
         self.assertFalse(guard.check_runs([run(12, "in_progress")], 11, clock))
 
