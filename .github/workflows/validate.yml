@@ -76,3 +76,28 @@ jobs:
             exit 1
           fi
           echo "AUDIT OK: destructive-restore vocabulary absent from scanned code."
+
+  windows-installer-smoke:
+    name: Live Windows OpenCode installer (isolated runner)
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - name: Install actual OpenCode on clean Windows runner
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:DEVBOX_WSROOT = Join-Path $env:RUNNER_TEMP 'DevBox-QA'
+          $env:DEVBOX_CONTROL_PATH = Join-Path $env:DEVBOX_WSROOT 'Control'
+          New-Item -ItemType Directory -Path $env:DEVBOX_CONTROL_PATH -Force | Out-Null
+          $toolsRoot = Join-Path $env:DEVBOX_WSROOT 'Tools'
+          ./scripts/install-opencode.ps1 -ToolsRoot $toolsRoot
+          $exe = Get-ChildItem -LiteralPath $toolsRoot -Filter 'opencode.exe' -File -Recurse | Select-Object -First 1
+          if (-not $exe) { throw 'Installer returned but opencode.exe was not installed.' }
+          & $exe.FullName --version
+          if ($LASTEXITCODE -ne 0) { throw "Installed OpenCode failed on Windows: $LASTEXITCODE" }
+          Write-Output 'WINDOWS OPENCODE INSTALL SMOKE: PASS'
