@@ -89,6 +89,9 @@ try {
           "$env:USERPROFILE\AGENTS.md",
           "$env:USERPROFILE\Documents\DevBox-Notes")
     }
+    # Legacy OpenCode project sessions are separate from the config folder.
+    # Keep authentication data excluded by the backup producer.
+    $hotPaths = @($hotPaths) + @(Join-Path $env:USERPROFILE '.local\share\opencode\project')
     foreach ($rawPath in $hotPaths) {
         $target = [Environment]::ExpandEnvironmentVariables([string]$rawPath)
         if (-not $target.StartsWith($env:USERPROFILE + '\', [System.StringComparison]::OrdinalIgnoreCase)) {
@@ -139,6 +142,27 @@ try {
             Copy-Item -LiteralPath $child.FullName -Destination (Join-Path $target $child.Name) -Recurse -Force -ErrorAction Stop
         }
         Write-DevBox OK "Restored saved DevBox $name into the new ephemeral runner."
+    }
+    # OpenCode v2's SQLite DB was snapshotted consistently while the old
+    # runner was active; recover it BEFORE anyone launches OpenCode on this VM.
+    # Do not import auth.json or other authentication material.
+    $dbSnapshots = @(Get-ChildItem -LiteralPath $staging -Recurse -File -Filter 'opencode.db' |
+        Where-Object { $_.FullName -match '[\\/]+PersistentData[\\/]+OpenCodeHistory[\\/]+opencode\.db
+Write-DevBox OK "Snapshot $snapshotId safely processed for this temporary GitHub runner."
+exit 0
+ })
+    if ($dbSnapshots.Count -gt 1) {
+        Stop-DevBox 'Ambiguous OpenCode DB snapshots: refusing to import arbitrary history.'
+    }
+    if ($dbSnapshots.Count -eq 1) {
+        $targetDb = Join-Path $env:USERPROFILE '.local\share\opencode\opencode.db'
+        & python (Join-Path $PSScriptRoot 'snapshot-opencode-db.py') $dbSnapshots[0].FullName $targetDb
+        if ($LASTEXITCODE -ne 0) {
+            Stop-DevBox 'OpenCode DB restore/integrity check failed.'
+        }
+        Write-DevBox OK 'Restored consistent OpenCode session history SQLite database.'
+    } else {
+        Write-DevBox INFO 'No saved OpenCode v2 SQLite history in this snapshot.'
     }
 } finally {
     Remove-Item -LiteralPath $staging -Force -Recurse -ErrorAction SilentlyContinue
