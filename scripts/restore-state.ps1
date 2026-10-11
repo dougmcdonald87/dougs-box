@@ -18,6 +18,9 @@ if (-not (Test-Path -LiteralPath $persistenceFile -PathType Leaf)) {
 }
 $persist = Get-Content -LiteralPath $persistenceFile -Raw | ConvertFrom-Json
 $repo = [string]$persist.repoUrl
+if (-not (Test-DevBoxRepoDestination -Repo $repo)) {
+    Stop-DevBox 'Refusing restore: repository is not the dedicated Lenovo endpoint or an approved disposable CI test repository.'
+}
 
 # A brand-new, dedicated repository is initialized only by the first verified
 # backup. A wrong password or unreachable server must NOT masquerade as empty.
@@ -113,6 +116,29 @@ try {
             Copy-Item -LiteralPath $source -Destination $target -Force -ErrorAction Stop
         }
         Write-DevBox OK "HOT state restored into runner: $target"
+    }
+
+    # Restore the DevBox's actual working directories. The backup script
+    # includes these roots; otherwise the next ephemeral runner starts empty.
+    # Stage first, then copy into the new runner workspace only.
+    foreach ($name in @('Projects', 'Workspace')) {
+        $target = Join-Path $env:DEVBOX_WSROOT $name
+        $driveLetter = $target.Substring(0, 1)
+        $tail = $target.Substring(3)
+        $candidates = @(
+            (Join-Path $staging (Join-Path $driveLetter $tail)),
+            (Join-Path $staging $tail)
+        )
+        $source = $candidates | Where-Object { Test-Path -LiteralPath $_ -PathType Container } | Select-Object -First 1
+        if (-not $source) {
+            Write-DevBox WARN "Snapshot did not contain saved $name directory; older canary-only snapshot is possible."
+            continue
+        }
+        New-DevboxDirectorySafe $target | Out-Null
+        foreach ($child in (Get-ChildItem -LiteralPath $source -Force)) {
+            Copy-Item -LiteralPath $child.FullName -Destination (Join-Path $target $child.Name) -Recurse -Force -ErrorAction Stop
+        }
+        Write-DevBox OK "Restored saved DevBox $name into the new ephemeral runner."
     }
 } finally {
     Remove-Item -LiteralPath $staging -Force -Recurse -ErrorAction SilentlyContinue
