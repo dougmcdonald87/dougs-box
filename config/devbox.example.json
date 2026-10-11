@@ -1,0 +1,28 @@
+{
+  "$schema": "",
+  "_comment": "Fill on the DevBox itself as config/devbox.json (gitignored). Values WITHOUT secrets. Secrets stay in GitHub Environment 'devbox'.",
+  "operating_mode": "OSS_ZERO_COST",
+  "runner_label_allowlist": [
+    "windows-2022",
+    "windows-2025",
+    "windows-2025-vs2026"
+  ],
+  "require_free_gib": 100,
+  "allow_network_workspace_fallback": false,
+  "workspace_root_name": "DevBox",
+  "backup_interval_minutes": 10,
+  "auto_restore_max_gib": 3,
+  "ready_target_minutes": 320,
+  "job_timeout_minutes": 350,
+  "job_hard_limit_minutes": 360,
+  "disk_warning_free_gib": 25,
+  "disk_critical_free_gib": 10,
+  "restic_repo_url_scheme": "rest:http://<storage-tailscale-ip>:8000/devbox/",
+  "hot_paths": [
+    "%USERPROFILE%\\.config\\opencode",
+    "%USERPROFILE%\\AGENTS.md",
+    "%USERPROFILE%\\Documents\\DevBox-Notes"
+  ],
+  "persist_opencode_auth": false,
+  "install_smb_friendly_mapping": false
+}

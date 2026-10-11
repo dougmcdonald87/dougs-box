@@ -1,0 +1,124 @@
+name: DevBox
+
+# MANUAL ONLY. V3 law: no push/PR/schedule triggers, no chaining.
+# Owner launches this from Actions; approve the `devbox` Environment when asked.
+# Cancel is EMERGENCY only - normal shutdown is "Finish DevBox Safely" on the desktop.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write   # Tailscale Workload Identity Federation (OIDC)
+
+# One DevBox at a time. A new manual launch cancels any previous session.
+concurrency:
+  group: devbox-session
+  cancel-in-progress: true
+
+# 350 min job timeout sits below the 360 min GitHub hard limit and leaves the
+# session manager ~30 min of headroom under the interactive 5h20-5h30 target.
+env:
+  JOB_TIMEOUT_MINUTES: 350
+  JOB_HARD_LIMIT_MINUTES: 360
+
+jobs:
+  preflight:
+    name: Preflight - resolve tested runner label
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      label: ${{ steps.label.outputs.label }}
+    steps:
+      - name: Resolve DEVBOX_RUNNER_LABEL against tested allowlist
+        id: label
+        shell: bash
+        run: |
+          set -euo pipefail
+          RAW="${{ vars.DEVBOX_RUNNER_LABEL }}"
+          if [ -z "$RAW" ]; then
+            echo "DEVBOX FAILED: repo variable DEVBOX_RUNNER_LABEL is unset."
+            echo "Next action: run probe-runners.yml once, then set the variable under"
+            echo "Settings > Secrets and variables > Actions > Variables."
+            exit 1
+          fi
+          case "$RAW" in
+            windows-2022|windows-2025|windows-2025-vs2026)
+              echo "label=$RAW" >> "$GITHUB_OUTPUT" ;;
+            *)
+              echo "DEVBOX FAILED: DEVBOX_RUNNER_LABEL '$RAW' is not in the tested allowlist."
+              echo "Next action: set it to windows-2022, windows-2025 or windows-2025-vs2026."
+              exit 1 ;;
+          esac
+
+  devbox:
+    name: DevBox session (${{ needs.preflight.outputs.label }})
+    needs: preflight
+    runs-on: ${{ needs.preflight.outputs.label }}
+    environment: devbox
+    timeout-minutes: 350
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - name: Bootstrap workspace root and structure
+        shell: pwsh
+        run: ./scripts/bootstrap.ps1
+
+      - name: Join tailnet (WIF/OIDC, ephemeral, tagged)
+        uses: tailscale/github-action@d1b6cd204f8dceda5b3eaad7f1f767be390056cd # v4.2.0
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_AUDIENCE }}
+          tags: tag:github-devbox
+          version: stable
+          hostname: devbox-${{ github.run_id }}
+
+      - name: Discover >=100 GiB workspace
+        id: storage
+        shell: pwsh
+        run: ./scripts/discover-storage.ps1
+
+      - name: Install OpenCode (standalone Windows x64)
+        shell: pwsh
+        run: ./scripts/install-opencode.ps1 -ToolsRoot "${{ steps.storage.outputs.fastRoot }}\DevBox\Tools"
+
+      - name: Configure RDP (runneradmin preferred, NLA kept)
+        shell: pwsh
+        env:
+          DEVBOX_RDP_PASSWORD: ${{ secrets.DEVBOX_RDP_PASSWORD }}
+        run: ./scripts/configure-rdp.ps1 -Password (New-Object System.Net.NetworkCredential('x', $env:DEVBOX_RDP_PASSWORD).SecurePassword)
+
+      - name: Connect persistence (restic over Tailscale)
+        shell: pwsh
+        env:
+          RESTIC_PASSWORD: ${{ secrets.RESTIC_PASSWORD }}
+        run: ./scripts/connect-persistence.ps1
+
+      - name: Restore state (HOT first, Git canonical, small overlay)
+        shell: pwsh
+        env:
+          RESTIC_PASSWORD: ${{ secrets.RESTIC_PASSWORD }}
+        run: ./scripts/restore-state.ps1
+
+      - name: First canary + backup proof
+        shell: pwsh
+        env:
+          RESTIC_PASSWORD: ${{ secrets.RESTIC_PASSWORD }}
+        run: ./scripts/save-state.ps1 -First
+
+      - name: Start session manager (heartbeat, deadline, backup scheduler)
+        shell: pwsh
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/session-manager.ps1 -JobStart
+
+      - name: Health check
+        shell: pwsh
+        run: ./scripts/health-check.ps1
+
+      - name: DEVBOX READY summary
+        if: success()
+        shell: pwsh
+        run: |
+          & ./scripts/health-check.ps1 -SummaryOnly
+          Write-Output "Open Tailscale and select the ephemeral DevBox node (devbox-${{ github.run_id }}). Sign in with runneradmin."
