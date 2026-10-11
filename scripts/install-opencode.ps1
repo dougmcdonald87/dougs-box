@@ -14,7 +14,7 @@ $exe = Join-Path $dir 'opencode.exe'
 
 if (Test-Path -LiteralPath $exe -PathType Leaf) {
     $existing = & $exe --version 2>$null | Out-String
-    if ($LASTEXITCODE -eq 0 -and $existing.Trim() -eq $version) {
+    if ($LASTEXITCODE -eq 0 -and $existing.Trim() -eq "opencode v$version") {
         Write-DevBox OK "OpenCode $version already installed at $exe."
         exit 0
     }
@@ -34,7 +34,7 @@ $native = Get-ChildItem -LiteralPath (Join-Path $dir 'node_modules') -Filter 'op
 if (-not $native) { Stop-DevBox 'Official v2 npm package did not provide a Windows opencode.exe.' }
 Copy-Item -LiteralPath $native.FullName -Destination $exe -Force -ErrorAction Stop
 $actualVersion = (& $exe --version | Out-String).Trim()
-if ($LASTEXITCODE -ne 0 -or $actualVersion -ne $version) {
+if ($LASTEXITCODE -ne 0 -or $actualVersion -ne "opencode v$version") {
     Stop-DevBox "OpenCode v2 version verification failed: expected $version, got $actualVersion."
 }
 "opencode-version=v$version" | Set-Content (Join-Path $dir 'version.txt') -Encoding ascii
