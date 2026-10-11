@@ -50,6 +50,10 @@ jobs:
           }
           if ($bad) { exit 1 }
 
+      - name: Run retry-helper regression tests
+        shell: pwsh
+        run: ./tests/retry-strictmode.tests.ps1
+
       - name: Append-only law + data-loss audit
         # Phase 41: destructive commands must appear in ZERO code files.
         # Scope = code (.ps1/.psd1/.json). The two enforcement artifacts are
