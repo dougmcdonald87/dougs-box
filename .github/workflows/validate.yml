@@ -54,6 +54,10 @@ jobs:
         shell: pwsh
         run: ./tests/retry-strictmode.tests.ps1
 
+      - name: Adversarial user-stop control regression
+        shell: pwsh
+        run: ./tests/control-queue.tests.ps1
+
       - name: Append-only law + data-loss audit
         # Phase 41: destructive commands must appear in ZERO code files.
         # Scope = code (.ps1/.psd1/.json). The two enforcement artifacts are
@@ -106,6 +110,36 @@ jobs:
           }
           Write-Output 'WINDOWS OPENCODE V2 INSTALL SMOKE: PASS'
 
+  windows-control-links:
+    name: Windows RDP desktop shortcut smoke (disposable runner)
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 8
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Install and inspect both public desktop shortcuts
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:DEVBOX_WSROOT = Join-Path $env:RUNNER_TEMP 'DevBox-Control-Desktop-QA'
+          $control = Join-Path $env:DEVBOX_WSROOT 'Control'
+          New-Item -ItemType Directory -Path $control -Force | Out-Null
+          New-Item -ItemType Directory -Path (Join-Path $env:DEVBOX_WSROOT 'Workspace') -Force | Out-Null
+          Set-Content -LiteralPath (Join-Path $control 'session.json') -Value '{}' -Encoding ascii
+          ./scripts/install-desktop-controls.ps1
+          $desktop = [Environment]::GetFolderPath('CommonDesktopDirectory')
+          $shell = New-Object -ComObject WScript.Shell
+          foreach ($name in @('Save DevBox State Now','Finish DevBox Safely')) {
+            $link = Join-Path $desktop "$name.lnk"
+            if (-not (Test-Path -LiteralPath $link)) { throw "Desktop control missing: $name" }
+            $shortcut = $shell.CreateShortcut($link)
+            if ($shortcut.Arguments -notlike '*request-control.ps1*') { throw "Unexpected shortcut target for $name" }
+            Write-Output "CONTROL SHORTCUT CONFIRMED: $name"
+          }
+          Write-Output 'WINDOWS DESKTOP CONTROL SMOKE: PASS'
+
   windows-backup-restore:
     name: Windows real Restic backup and restore (isolated local repo)
     runs-on: windows-2025-vs2026
@@ -146,6 +180,25 @@ jobs:
           if ((Get-Content -LiteralPath (Join-Path $projectsDir.FullName 'PROJECT-TEST.txt') -Raw).Trim() -ne 'persist me: project') { throw 'Project was NOT restored.' }
           if ((Get-Content -LiteralPath (Join-Path $workspaceDir.FullName 'WORKSPACE-TEST.txt') -Raw).Trim() -ne 'persist me: workspace') { throw 'Workspace was NOT restored.' }
           Write-Output 'WINDOWS RESTIC BACKUP AND REAL WORK RECOVERY: PASS'
+          # Strongest cheap integration attack: STOP must invoke the real restic
+          # save-state.ps1 against this disposable local encrypted repository.
+          . ./scripts/control-queue.ps1
+          $commands = Join-Path $env:DEVBOX_CONTROL_PATH 'Commands'
+          New-Item -ItemType Directory -Path $commands -Force | Out-Null
+          $id = [guid]::NewGuid().ToString('N')
+          Set-Content -LiteralPath (Join-Path $commands "stop-$id.request") -Value 'real-restic-test' -Encoding ascii
+          $stop = Invoke-DevBoxControlRequests -ControlPath $env:DEVBOX_CONTROL_PATH -VerifiedSave {
+            param([string]$action)
+            ./scripts/save-state.ps1
+            return ($LASTEXITCODE -eq 0)
+          }
+          if (-not $stop) { throw 'Real verified Restic snapshot failed to approve STOP.' }
+          $result = Get-Content -LiteralPath (Join-Path $commands "stop-$id.result.json") -Raw | ConvertFrom-Json
+          if (-not $result.success -or -not $result.snapshotId) {
+            throw 'STOP claimed success without a new real Restic snapshot.'
+          }
+          Write-Output 'WINDOWS REAL RESTIC -> SAFE STOP INTEGRATION: PASS'
+
 
   windows-devbox-stages:
     name: Windows stage smoke - Restic, RDP and firewall

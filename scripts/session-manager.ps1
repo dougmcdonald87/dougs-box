@@ -4,6 +4,7 @@
 param([switch]$JobStart, [switch]$SmokeOnly)
 Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot 'common.ps1')
+. (Join-Path $PSScriptRoot 'control-queue.ps1')
 
 if (-not $JobStart) {
     Write-Output 'Session manager requires -JobStart.'
@@ -68,7 +69,7 @@ if ($SmokeOnly) {
 Write-DevBox OK 'DEVBOX READY — interactive session now held open by the active Actions job.'
 
 while ($true) {
-    Start-Sleep -Seconds 60
+    Start-Sleep -Seconds 10
     Write-Heartbeat
     $now = [DateTime]::UtcNow
 
@@ -80,6 +81,18 @@ while ($true) {
             exit 2
         }
         Write-DevBox OK 'Final verified backup succeeded. Closing the session cleanly.'
+        exit 0
+    }
+
+    # Only the runner process has restic credentials; RDP shortcuts do not.
+    # A user-requested stop requires a NEW verified snapshot. Failure keeps
+    # this session alive so the user can retry without losing their work.
+    $safeStop = Invoke-DevBoxControlRequests -ControlPath $env:DEVBOX_CONTROL_PATH -VerifiedSave {
+        param([string]$Action)
+        Invoke-VerifiedSave -Reason "Manual $Action"
+    }
+    if ($safeStop) {
+        Write-DevBox OK 'Owner-requested STOP: fresh verified backup succeeded. Ending runner job.'
         exit 0
     }
 

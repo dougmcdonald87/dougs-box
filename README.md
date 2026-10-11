@@ -42,6 +42,21 @@ docs/                               RESEARCH / ARCHITECTURE / OPERATING-MODES /
                                     TROUBLESHOOTING / ZERO-COST-CHECK / FIRST-RUN
 ```
 
+## Save / Finish controls and optional iPhone launcher
+
+For any **new** DevBox session started after deployment of this feature,
+the Windows Public Desktop contains `Save DevBox State Now` and
+`Finish DevBox Safely`. The latter requests and verifies a fresh Lenovo
+Restic snapshot **before** the normal GitHub job voluntarily exits.
+If verification fails, the requested stop is refused. GitHub timeouts and
+unexpected cancellations remain outside this guarantee.
+
+See [iPhone starter and verified-stop setup](docs/IPHONE_START_VERIFIED_STOP.md)
+and the [adversarial evidence ledger](docs/CONTROL_ADVERSARIAL_EVIDENCE_2026-10-11.md)
+for status, setup, residual risks and test links. A fully configured one-tap
+iPhone Shortcut is **not** shipped or activated: the owner must set it up
+and test it, with a repo-scoped GitHub token. No automatic six-hour relaunch.
+
 ## Fast start
 
 Skim `docs/FIRST-RUN.md` for the one-time UI setup (13 numbered clicks) and the
