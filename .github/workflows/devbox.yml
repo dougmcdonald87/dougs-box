@@ -94,6 +94,7 @@ jobs:
         shell: pwsh
         env:
           RESTIC_PASSWORD: ${{ secrets.RESTIC_PASSWORD }}
+          DEVBOX_STORAGE_TAILSCALE_IP: '100.70.202.110'
         run: ./scripts/connect-persistence.ps1
 
       - name: Restore state (HOT first, Git canonical, small overlay)
