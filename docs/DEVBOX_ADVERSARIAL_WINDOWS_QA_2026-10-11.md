@@ -61,3 +61,15 @@
 - Windows Restic installation, isolated backup/restore and RDP setup: **SURVIVED relevant isolated tests**.
 - Complete live Lenovo-backed RDP DevBox: **UNVERIFIED**, subject to a single post-validation live trial.
 - End-to-end real network/tailnet connection to Lenovo Restic server, actual RDP login and hours-long session retention are still **UNVERIFIED**.
+
+## Pass 10 — OpenCode version falsifier, not just installer success
+
+- **Claim challenged:** The previous `opencode.exe --version` smoke proved Dotty's **OpenCode v2** requirement.
+- **Smallest falsifier:** The executable runs but prints a v1 release.
+- **Observation:** Windows smoke #38149560893 printed v1.19.0 even though all its assertions passed. Upstream GitHub `releases/latest` selected v1.19.0, while the upstream v2 tag and official v2 CLI npm package had already been published.
+- **Fix:** Replace v1 GitHub release installer with official `npm install --prefix <ephemeral Tools> @opencode/cli@2.0.24`, extract native Windows `opencode.exe`, and require actual output `opencode v2.0.24`. No WSL and no new user credential.
+- **Test:** [Windows GitHub CI #38151475128](https://github.com/dougmcdonald87/dougs-box/actions/runs/38151475128) Windows OpenCode job **PASS**; confirmed `Official OpenCode v2.0.24 installed` and `WINDOWS OPENCODE V2 INSTALL SMOKE: PASS`.
+- **Verdict:** Previous "v2 installed" claim **FALSIFIED**; new specific v2 Windows installation **SURVIVED** the real test.
+- **Residual risk:** Version compatibility of restored plugins/configurations, user account login and real long-running DevBox remain untested.
+
+Primary source: https://opencode.ai/v2/docs (official CLI uses `@opencode/cli` with platform-native postinstall).

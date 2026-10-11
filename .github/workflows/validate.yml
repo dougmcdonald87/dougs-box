@@ -100,9 +100,11 @@ jobs:
           ./scripts/install-opencode.ps1 -ToolsRoot $toolsRoot
           $exe = Get-ChildItem -LiteralPath $toolsRoot -Filter 'opencode.exe' -File -Recurse | Select-Object -First 1
           if (-not $exe) { throw 'Installer returned but opencode.exe was not installed.' }
-          & $exe.FullName --version
-          if ($LASTEXITCODE -ne 0) { throw "Installed OpenCode failed on Windows: $LASTEXITCODE" }
-          Write-Output 'WINDOWS OPENCODE INSTALL SMOKE: PASS'
+          $found = (& $exe.FullName --version | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0 -or $found -ne 'opencode v2.0.24') {
+            throw "Expected OpenCode v2.0.24, but Windows executable returned '$found' (exit $LASTEXITCODE)."
+          }
+          Write-Output 'WINDOWS OPENCODE V2 INSTALL SMOKE: PASS'
 
   windows-backup-restore:
     name: Windows real Restic backup and restore (isolated local repo)
