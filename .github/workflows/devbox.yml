@@ -69,6 +69,10 @@ jobs:
         shell: pwsh
         run: ./scripts/bootstrap.ps1
 
+      - name: Configure UK timezone (GMT/BST) and verify DST
+        shell: pwsh
+        run: ./scripts/configure-timezone.ps1
+
       - name: Check GitHub OIDC claims before Tailscale
         shell: pwsh
         env:
