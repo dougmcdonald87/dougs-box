@@ -14,7 +14,7 @@
 | 6 | [Local Restic integration #38150544218](https://github.com/dougmcdonald87/dougs-box/actions/runs/38150544218) | Actual backup initialized, snapshot listed and canary round-trip SHA256 verified. Restoration failed because script requested non-existent `stats --mode archive-size`. |
 | 7 | [Restic and RDP integration #38150605320](https://github.com/dougmcdonald87/dougs-box/actions/runs/38150605320) | After switching to valid `restore-size`, real isolated encrypted backup and recovery of intentionally removed `Projects` and `Workspace` test files PASSED. Real RDP firewall restricted to `100.64.0.0/255.192.0.0` (equivalent to /10) PASSED. One OpenCode test received HTTP 403 from anonymous GitHub API. |
 | 8 | [Rate limit test #38150752393](https://github.com/dougmcdonald87/dougs-box/actions/runs/38150752393) | Fixed OpenCode release discovery to authenticate with the workflow's automatic GitHub token; actual Windows installation test PASSED. |
-| 9 | [Session startup test #38150908390](https://github.com/dougmcdonald87/dougs-box/actions/runs/38150908390) | Pending/confirm conclusion before claiming session manager pass. |
+| 9 | [Session startup test #38150908390](https://github.com/dougmcdonald87/dougs-box/actions/runs/38150908390) | Real Windows service/RDP setup, mock tailnet status, actual session-manager health and heartbeat functions PASSED. Output confirms `SESSION STARTUP SMOKE` without claiming a live interactive session. |
 
 ## Falsification cards
 
@@ -60,3 +60,4 @@
 - GitHub OIDC+Tailscale join: **SURVIVED live run 38148379792**.
 - Windows Restic installation, isolated backup/restore and RDP setup: **SURVIVED relevant isolated tests**.
 - Complete live Lenovo-backed RDP DevBox: **UNVERIFIED**, subject to a single post-validation live trial.
+- End-to-end real network/tailnet connection to Lenovo Restic server, actual RDP login and hours-long session retention are still **UNVERIFIED**.
