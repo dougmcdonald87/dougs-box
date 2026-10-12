@@ -22,11 +22,17 @@ try {
     Set-Content -LiteralPath (Join-Path $drive 'My Project\OUTSIDE-WORKSPACE.txt') -Value 'user-work'
     Set-Content -LiteralPath (Join-Path $workspace 'PersistentData\KEEP.txt') -Value 'persistent'
     Set-Content -LiteralPath (Join-Path $drive 'a\DO-NOT-SAVE.txt') -Value 'runner-internal'
+    Set-Content -LiteralPath (Join-Path $drive 'DumpStack.log.tmp') -Value 'system-log'
+    Set-Content -LiteralPath (Join-Path $drive 'user-work.tmp') -Value 'user-work'
+    Set-Content -LiteralPath (Join-Path $drive 'My Project\DumpStack.log.tmp') -Value 'nested-user-work'
     $scope = Get-DevBoxDriveRoots -DriveRoot $drive -WorkspaceRoot $workspace
     Assert (@($scope.Roots | Where-Object { $_ -ieq (Join-Path $drive 'My Project') }).Count -eq 1) 'Custom drive-root user folder omitted'
     Assert (@($scope.Roots | Where-Object { $_ -ieq (Join-Path $workspace 'PersistentData') }).Count -eq 0) 'Nested root wrongly duplicated'
     Assert (@($scope.Roots | Where-Object { $_ -ieq (Join-Path $drive 'a') }).Count -eq 0) 'GitHub runner root was included'
     Assert (@($scope.ExcludePatterns | Where-Object { $_ -match '/Control' }).Count -gt 0) 'Live control state not excluded'
+    Assert (@($scope.Roots | Where-Object { $_ -ieq (Join-Path $drive 'DumpStack.log.tmp') }).Count -eq 0) 'Windows locked dump log was included'
+    Assert (@($scope.Roots | Where-Object { $_ -ieq (Join-Path $drive 'user-work.tmp') }).Count -eq 1) 'User-owned temporary file was omitted'
+    Assert (@($scope.ExcludePatterns | Where-Object { $_ -match 'DumpStack|\*\.tmp' }).Count -eq 0) 'Nested user temporary files were excluded'
     Write-Output 'ATTACK 1: custom D root included, runner folder excluded: SURVIVED'
     Set-Content -LiteralPath (Join-Path $staging 'E\DevBox\Projects\STATE.txt') -Value 'restored'
     Set-Content -LiteralPath (Join-Path $staging 'E\DevBox\Control\DANGER.txt') -Value 'wrong-run-control'
@@ -51,3 +57,4 @@ try {
     $env:DEVBOX_ISOLATED_TEST = $oldFlag
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
 }
+

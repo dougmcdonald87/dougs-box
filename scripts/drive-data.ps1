@@ -21,7 +21,9 @@ function Get-DevBoxDriveRoots {
     $excluded = @('a','_temp','_work','_tool','hostedtoolcache','runner','agent',
         'System Volume Information','$RECYCLE.BIN','Windows','WindowsApps',
         'Program Files','Program Files (x86)','ProgramData','PerfLogs',
-        'pagefile.sys','swapfile.sys','hiberfil.sys')
+        'pagefile.sys','swapfile.sys','hiberfil.sys','DumpStack.log.tmp')
+    # Windows holds the volume-root crash-dump log open exclusively. Exclude
+    # that exact root entry; user .tmp files (including nested names) remain.
     $enumerate = if ($base -match '^[A-Za-z]:$') { $base + '\' } else { $base }
     $roots = @()
     $skipped = @()
@@ -132,3 +134,4 @@ function Import-DevBoxDriveRoots {
     if ($count -eq 0) { throw 'Saved workspace listed but no drive roots restored.' }
     return $true
 }
+
