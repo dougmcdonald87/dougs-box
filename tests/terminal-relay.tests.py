@@ -1,10 +1,13 @@
 """Boundary checks for restore readiness and transient status outages."""
 import importlib.util
+import io
+import os
 from pathlib import Path
 import sys
 import unittest
 from unittest.mock import patch
 import urllib.error
+import zipfile
 
 root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(root / 'scripts'))
@@ -14,6 +17,32 @@ spec.loader.exec_module(relay)
 
 
 class RelayBoundaryTests(unittest.TestCase):
+    def test_invalid_artifact_is_rejected_without_retry(self):
+        artifact = {'id':7, 'name':'devbox-terminal-123-1','expired':False}
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, 'w') as z:
+            z.writestr('unexpected.txt', 'must not be used')
+        response = io.BytesIO(archive.getvalue())
+        with patch.dict(os.environ, {'GITHUB_REPOSITORY':'owner/repo','GITHUB_TOKEN':'test-only'}), patch.object(relay, 'windows_job', return_value={'status':'in_progress'}), patch.object(relay, 'api', return_value={'artifacts':[artifact]}), patch.object(relay.urllib.request, 'build_opener') as opener, patch.object(relay.time, 'sleep', side_effect=AssertionError('Invalid artifact was retried')):
+            opener.return_value.open.return_value = response
+            with self.assertRaisesRegex(ValueError, 'Unexpected artifact files'):
+                relay.wait_for_manifest('123','1')
+
+    def test_artifact_transport_error_can_recover(self):
+        artifact = {'id':7, 'name':'devbox-terminal-123-1','expired':False}
+        error = urllib.error.HTTPError('https://api.github.com/test', 503, 'temporary', {}, None)
+        with patch.object(relay, 'windows_job', return_value={'status':'in_progress'}), patch.object(relay, 'api', return_value={'artifacts':[artifact]}), patch.object(relay, 'artifact_manifest', side_effect=[error, {'ready':True}]), patch.object(relay.time, 'sleep') as pause:
+            self.assertEqual(relay.wait_for_manifest('123','1'), {'ready':True})
+            pause.assert_called_once_with(5)
+
+    def test_artifact_access_denial_is_not_retried(self):
+        artifact = {'id':7, 'name':'devbox-terminal-123-1','expired':False}
+        error = urllib.error.HTTPError('https://api.github.com/test', 403, 'denied', {}, None)
+        with patch.object(relay, 'windows_job', return_value={'status':'in_progress'}), patch.object(relay, 'api', return_value={'artifacts':[artifact]}), patch.object(relay, 'artifact_manifest', side_effect=error), patch.object(relay.time, 'sleep') as pause:
+            with self.assertRaises(urllib.error.HTTPError):
+                relay.wait_for_manifest('123','1')
+            pause.assert_not_called()
+
     def test_restore_over_twenty_minutes_remains_eligible(self):
         artifact = {'id': 7, 'name': 'devbox-terminal-123-1', 'expired': False}
         responses = [{'artifacts': []}] * 100 + [{'artifacts': [artifact]}]

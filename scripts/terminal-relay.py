@@ -83,12 +83,24 @@ def wait_for_manifest(run_id, attempt):
                 raise RuntimeError('Windows session finished before relay startup')
             artifacts = api(f'actions/runs/{run_id}/artifacts?per_page=100')['artifacts']
             candidates = [a for a in artifacts if a['name'] == expected and not a['expired']]
-            if len(candidates) > 1:
-                raise RuntimeError('Ambiguous host-key artifact')
-            if len(candidates) == 1:
-                return artifact_manifest(candidates[0]['id'])
         except (urllib.error.URLError, TimeoutError, OSError, ValueError, KeyError, TypeError):
             print('Startup metadata temporarily unavailable; waiting without enabling SSH.', flush=True)
+            time.sleep(delay)
+            delay = min(60, delay * 2)
+            continue
+        if len(candidates) > 1:
+            raise RuntimeError('Ambiguous host-key artifact')
+        if len(candidates) == 1:
+            try:
+                return artifact_manifest(candidates[0]['id'])
+            except urllib.error.HTTPError as exc:
+                if exc.code not in (408, 429) and exc.code < 500:
+                    raise
+            except (urllib.error.URLError, TimeoutError, OSError):
+                pass
+            # Only transport failures and retryable HTTP responses reach here.
+            # Invalid ZIP/JSON, files, size or origin must terminate startup.
+            print('Artifact transport temporarily unavailable; retrying without enabling SSH.', flush=True)
             time.sleep(delay)
             delay = min(60, delay * 2)
             continue
