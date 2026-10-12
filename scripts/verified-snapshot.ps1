@@ -3,6 +3,13 @@
 # mutation/deletion of existing snapshot metadata on an append-only server.
 Set-StrictMode -Version Latest
 
+function Test-DevBoxSnapshotHasTag {
+    param([Parameter(Mandatory)][object]$Snapshot,
+          [Parameter(Mandatory)][string]$Tag)
+    $prop = $Snapshot.PSObject.Properties['tags']
+    return ($null -ne $prop -and @($prop.Value) -contains $Tag)
+}
+
 function Select-DevBoxVerifiedSnapshot {
     [CmdletBinding()]
     param(
@@ -12,7 +19,7 @@ function Select-DevBoxVerifiedSnapshot {
         [Parameter(Mandatory)][string]$TempRoot
     )
     $tag = 'devbox-verified-receipt-v1'
-    $receipts = @($Snapshots | Where-Object { @($_.tags) -contains $tag } |
+    $receipts = @($Snapshots | Where-Object { Test-DevBoxSnapshotHasTag -Snapshot $_ -Tag $tag } |
         Sort-Object { [DateTime]::Parse([string]$_.time) } -Descending)
     if ($receipts.Count -eq 0) {
         # The single known-good pre-receipt backup is grounded in job #14's
@@ -42,7 +49,7 @@ function Select-DevBoxVerifiedSnapshot {
         }
         $verified = @($Snapshots | Where-Object {
             [string]$_.id -eq [string]$proof.snapshotId -and
-            @($_.tags) -contains 'devbox-auto'
+            (Test-DevBoxSnapshotHasTag -Snapshot $_ -Tag 'devbox-auto')
         })
         if ($verified.Count -ne 1) {
             throw 'Receipt points to a missing or non-DevBox snapshot. Restore refused.'
