@@ -6,6 +6,7 @@ Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot 'find-staged-work.ps1')
 . (Join-Path $PSScriptRoot 'drive-data.ps1')
 . (Join-Path $PSScriptRoot 'verified-snapshot.ps1')
+. (Join-Path $PSScriptRoot 'restore-coverage.ps1')
 Write-Step 'restore-state'
 
 if ([string]::IsNullOrWhiteSpace($env:RESTIC_PASSWORD)) {
@@ -190,6 +191,9 @@ try {
     } else {
         Write-DevBox INFO 'No saved OpenCode v2 SQLite history in this snapshot.'
     }
+    # Do not call an empty Projects/PersistentData tree a successful content
+    # recovery just because the Restic restore command returned exit 0.
+    Assert-DevBoxRestoreCoverage -ResticExe $restic -Repo $repo -SnapshotId $snapshotId -WorkspaceRoot $env:DEVBOX_WSROOT
 } finally {
     Remove-Item -LiteralPath $staging -Force -Recurse -ErrorAction SilentlyContinue
 }

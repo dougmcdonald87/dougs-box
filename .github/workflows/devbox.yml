@@ -126,6 +126,12 @@ jobs:
         shell: pwsh
         run: ./scripts/discover-storage.ps1
 
+      # Create Save/Finish on the Public Desktop BEFORE the first restore or
+      # backup. If persistence is slow/fails, controls must still be visible.
+      - name: Install Save and Finish buttons before persistence
+        shell: pwsh
+        run: ./scripts/install-desktop-controls.ps1
+
       - name: Install OpenCode (standalone Windows x64)
         shell: pwsh
         env:
@@ -164,10 +170,6 @@ jobs:
           RESTIC_REST_USERNAME: devbox
           RESTIC_REST_PASSWORD: ${{ secrets.DEVBOX_STORAGE_PASSWORD }}
         run: ./scripts/save-state.ps1 -First
-
-      - name: Install local RDP Save and Finish Safely controls
-        shell: pwsh
-        run: ./scripts/install-desktop-controls.ps1
 
       # The session manager is the LAST step. It first writes a heartbeat,
       # runs health checks, prints READY, then blocks until the session ends.

@@ -139,7 +139,20 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or $found -ne 'opencode v2.0.24') {
             throw "Expected OpenCode v2.0.24, but Windows executable returned '$found' (exit $LASTEXITCODE)."
           }
-          Write-Output 'WINDOWS OPENCODE V2 INSTALL SMOKE: PASS'
+          # Attack: a tool can be installed under D: but unavailable from C:
+          # in a normal CMD/PowerShell session. Prove both paths resolve.
+          Push-Location $env:WINDIR
+          try {
+            $resolved = (Get-Command opencode.exe -CommandType Application -ErrorAction Stop).Source
+            if ($resolved -ine $exe.FullName) { throw "OpenCode resolved outside the installed global command." }
+            $fromCmd = (& cmd.exe /d /c 'cd /d %SystemRoot% && opencode.exe --version' | Out-String).Trim()
+            if ($LASTEXITCODE -ne 0 -or $fromCmd -ne 'opencode v2.0.24') {
+              throw "CMD could not run global opencode from C:."
+            }
+          } finally { Pop-Location }
+          ./scripts/install-opencode.ps1 -ToolsRoot $toolsRoot
+          if ($LASTEXITCODE -ne 0) { throw 'Already-installed OpenCode did not retain global PATH.' }
+          Write-Output 'WINDOWS OPENCODE GLOBAL CLI FROM C: AND REINSTALL: PASS'
 
   windows-control-links:
     name: Windows RDP desktop shortcut smoke (disposable runner)
@@ -208,7 +221,18 @@ jobs:
             if ($shortcut.Arguments -notlike '*request-control.ps1*') { throw "Unexpected shortcut target for $name" }
             Write-Output "CONTROL SHORTCUT CONFIRMED: $name"
           }
-          Write-Output 'WINDOWS DESKTOP CONTROL SMOKE: PASS'
+          . ./scripts/desktop-controls-health.ps1
+          if (-not (Test-DevBoxDesktopControls)) { throw 'Both public controls not actionable.' }
+          # Attack: remove one shortcut and ensure the running session can
+          # repair it without backup credentials or restarting the VM.
+          $missing = Join-Path $desktop 'Save DevBox State Now.lnk'
+          Remove-Item -LiteralPath $missing -Force
+          if (Test-DevBoxDesktopControls) { throw 'Missing Save link falsely reported healthy.' }
+          if (-not (Repair-DevBoxDesktopControls -ScriptsRoot (Join-Path (Get-Location).Path 'scripts'))) {
+            throw 'Missing Save button was not repaired.'
+          }
+          if (-not (Test-DevBoxDesktopControls)) { throw 'Repaired buttons still not actionable.' }
+          Write-Output 'WINDOWS DESKTOP CONTROL DELETION AND LIVE REPAIR: PASS'
 
   windows-backup-restore:
     name: Windows real Restic backup and restore (isolated local repo)
@@ -386,6 +410,9 @@ jobs:
               '{"Self":{"Tags":["tag:github-devbox"]}}'
             } else { throw 'Mock tailnet accepts status only.' }
           }
+          # Startup must create both buttons even when no backup has yet run.
           ./scripts/session-manager.ps1 -JobStart -SmokeOnly
           if ($LASTEXITCODE -ne 0) { throw 'Session manager readiness smoke failed.' }
+          . ./scripts/desktop-controls-health.ps1
+          if (-not (Test-DevBoxDesktopControls)) { throw 'Startup passed despite missing desktop controls.' }
           Write-Output 'WINDOWS SESSION MANAGER READINESS SMOKE: PASS'

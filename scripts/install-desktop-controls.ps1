@@ -17,6 +17,8 @@ New-Item -ItemType Directory -Path $destinationDir -Force | Out-Null
 $client = Join-Path $destinationDir 'request-control.ps1'
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'request-control.ps1') -Destination $client -Force
 
+# Public Desktop is merged into every interactive Windows user's desktop.
+# Save controls here on EVERY startup, before restore or backup begins.
 $desktop = [Environment]::GetFolderPath('CommonDesktopDirectory')
 if ([string]::IsNullOrWhiteSpace($desktop) -or -not (Test-Path -LiteralPath $desktop -PathType Container)) {
     throw 'Public desktop folder missing: cannot install safe controls.'
@@ -42,4 +44,15 @@ foreach ($entry in @(
     }
     Write-Output "Installed desktop control: $shortcutPath"
 }
-Write-Output 'Desktop control links created (not yet end-to-end RDP tested).'
+# Validate the shortcuts against their actual targets, not merely whether
+# Windows created two .lnk files. This is still not a visual RDP test.
+foreach ($action in @('Save DevBox State Now', 'Finish DevBox Safely')) {
+    $path = Join-Path $desktop ($action + '.lnk')
+    $link = $shell.CreateShortcut($path)
+    if (-not (Test-Path -LiteralPath $link.TargetPath -PathType Leaf) -or
+        -not ($link.Arguments -like '*request-control.ps1*' -and $link.Arguments -match 'Action (save|stop)') -or
+        -not (Test-Path -LiteralPath $client -PathType Leaf)) {
+        throw "Desktop control link is not actionable: $action"
+    }
+}
+Write-Output 'Both Public Desktop controls exist and point to a present request client. RDP visibility still requires checking.'
