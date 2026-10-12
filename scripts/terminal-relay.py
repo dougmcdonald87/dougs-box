@@ -72,25 +72,33 @@ def windows_job():
     return next((job for job in jobs if job['name'].startswith('DevBox session (')), None)
 
 
+def wait_for_manifest(run_id, attempt):
+    """Wait while Windows is healthy; the enclosing Actions job bounds lifetime."""
+    expected = f'devbox-terminal-{run_id}-{attempt}'
+    delay = 5
+    while True:
+        try:
+            job = windows_job()
+            if job and job['status'] == 'completed':
+                raise RuntimeError('Windows session finished before relay startup')
+            artifacts = api(f'actions/runs/{run_id}/artifacts?per_page=100')['artifacts']
+            candidates = [a for a in artifacts if a['name'] == expected and not a['expired']]
+            if len(candidates) > 1:
+                raise RuntimeError('Ambiguous host-key artifact')
+            if len(candidates) == 1:
+                return artifact_manifest(candidates[0]['id'])
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError, KeyError, TypeError):
+            print('Startup metadata temporarily unavailable; waiting without enabling SSH.', flush=True)
+            time.sleep(delay)
+            delay = min(60, delay * 2)
+            continue
+        delay = 5
+        time.sleep(15)
+
+
 def main():
     run_id, attempt = os.environ['GITHUB_RUN_ID'], os.environ['GITHUB_RUN_ATTEMPT']
-    expected = f'devbox-terminal-{run_id}-{attempt}'
-    deadline = time.monotonic() + 1200
-    manifest = None
-    while time.monotonic() < deadline:
-        job = windows_job()
-        if job and job['status'] == 'completed':
-            raise RuntimeError('Windows session finished before relay startup')
-        artifacts = api(f'actions/runs/{run_id}/artifacts?per_page=100')['artifacts']
-        candidates = [a for a in artifacts if a['name'] == expected and not a['expired']]
-        if len(candidates) == 1:
-            manifest = artifact_manifest(candidates[0]['id'])
-            break
-        if len(candidates) > 1:
-            raise RuntimeError('Ambiguous host-key artifact')
-        time.sleep(15)
-    if manifest is None:
-        raise TimeoutError('No Windows terminal manifest within 20 minutes')
+    manifest = wait_for_manifest(run_id, attempt)
     if (manifest.get('version') != 1 or manifest.get('runId') != run_id or
             manifest.get('runAttempt') != attempt or manifest.get('account') not in ('runneradmin', 'devbox') or
             ipaddress.ip_address(manifest['address']) not in ipaddress.ip_network('100.64.0.0/10')):
