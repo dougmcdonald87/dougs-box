@@ -54,6 +54,12 @@ jobs:
         shell: pwsh
         run: ./tests/retry-strictmode.tests.ps1
 
+      - name: Adversarial relay readiness and transient API failure tests
+        shell: bash
+        run: |
+          python3 -m pip install --disable-pip-version-check paramiko==4.0.0
+          python3 tests/terminal-relay.tests.py
+
       - name: Verify read-only audit mode cannot start or cancel desktop
         shell: bash
         run: python3 tests/opencode-audit-workflow.tests.py
