@@ -132,38 +132,3 @@ function Import-DevBoxDriveRoots {
     if ($count -eq 0) { throw 'Saved workspace listed but no drive roots restored.' }
     return $true
 }
-) {
-        if ($env:DEVBOX_ISOLATED_TEST -ne '1' -or
-            $oldBase -notmatch '^[A-Za-z]:\\') {
-            throw 'Saved drive root is malformed or outside allowed production drive root.'
-        }
-    }
-    $oldLetter = $oldBase.Substring(0,1)
-    $blocked = @('a','_temp','_work','_tool','hostedtoolcache','runner','agent',
-        'System Volume Information','$RECYCLE.BIN','Windows','WindowsApps',
-        'Program Files','Program Files (x86)','ProgramData','PerfLogs')
-    $count = 0
-    foreach ($manifestPath in $SnapshotPaths) {
-        $oldPath = ([string]$manifestPath).Replace('/','\')
-        if (-not $oldPath.StartsWith($oldBase + '\', [StringComparison]::OrdinalIgnoreCase)) { continue }
-        $relative = $oldPath.Substring($oldBase.Length).TrimStart('\')
-        $components = @($relative -split '\\')
-        if (-not $relative -or @($components | Where-Object { $_ -eq '' -or $_ -eq '.' -or $_ -eq '..' }).Count) {
-            throw 'Unsafe source path in saved manifest.'
-        }
-        if ($components[0] -in $blocked) { throw 'Saved manifest unexpectedly contains runner/system root.' }
-        $target = [IO.Path]::GetFullPath((Join-Path ($currentBase + '\') $relative))
-        if (-not $target.StartsWith($currentBase + '\', [StringComparison]::OrdinalIgnoreCase)) {
-            throw 'Restored data would escape selected drive.'
-        }
-        $tail = $oldPath.Substring(3)
-        $from = @( (Join-Path $StagingRoot (Join-Path $oldLetter $tail)), (Join-Path $StagingRoot $tail) )
-        $existing = @($from | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -Unique)
-        if ($existing.Count -ne 1) { throw "Missing or ambiguous staged source for $relative" }
-        Merge-DevBoxStagedTree -Source $existing[0] -Target $target -WorkspaceRoot $workspace
-        $count++
-        Write-Host "DRIVE RESTORE VERIFIED ROOT: $relative"
-    }
-    if ($count -eq 0) { throw 'Saved workspace listed but no drive roots restored.' }
-    return $true
-}
