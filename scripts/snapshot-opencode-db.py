@@ -16,9 +16,12 @@ def session_count(path: Path):
     """Return only a count, never conversation content; None means unknown schema."""
     with closing(sqlite3.connect(Path(path).resolve().as_uri() + "?mode=ro", uri=True, timeout=15)) as db:
         tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-        counts = [db.execute('SELECT COUNT(*) FROM "' + name + '"').fetchone()[0]
-                  for name in ('session', 'sessions') if name in tables]
-        return sum(counts) if counts else None
+        # V2's active session projection is session_v2. A retained V1 session
+        # table must not mask an empty V2 projection after migration.
+        for name in ('session_v2', 'session', 'sessions'):
+            if name in tables:
+                return db.execute('SELECT COUNT(*) FROM "' + name + '"').fetchone()[0]
+        return None
 
 
 def snapshot(source: Path, destination: Path) -> None:
