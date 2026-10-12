@@ -173,6 +173,16 @@ try {
     # restic finishes and before this runner starts an interactive OpenCode.
     $dbSnapshots = @(Get-ChildItem -LiteralPath $staging -Recurse -File -Filter 'opencode.db' |
         Where-Object { $_.FullName -match '[\\/]+PersistentData[\\/]+OpenCodeHistory[\\/]+opencode\.db$' })
+    # Older snapshots may contain the original profile DB rather than the newer
+    # staged History path. Only fall back when there is no staged copy, and keep
+    # the ambiguity check below: never choose an arbitrary user's database.
+    if ($dbSnapshots.Count -eq 0) {
+        $dbSnapshots = @(Get-ChildItem -LiteralPath $staging -Recurse -File -Filter 'opencode.db' |
+            Where-Object { $_.FullName -match '[\\/]+\.local[\\/]+share[\\/]+opencode[\\/]+opencode\.db$' })
+        if ($dbSnapshots.Count -gt 0) {
+            Write-DevBox INFO 'Located legacy user-profile SQLite history in selected snapshot.'
+        }
+    }
     if ($dbSnapshots.Count -gt 1) {
         Stop-DevBox 'Ambiguous OpenCode DB snapshots: refusing to import arbitrary history.'
     }
@@ -199,3 +209,4 @@ try {
 }
 Write-DevBox OK "Snapshot $snapshotId safely processed for this temporary GitHub runner."
 exit 0
+
