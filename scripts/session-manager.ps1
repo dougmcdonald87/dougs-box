@@ -7,6 +7,7 @@ Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot 'control-queue.ps1')
 . (Join-Path $PSScriptRoot 'invoke-save-isolated.ps1')
 . (Join-Path $PSScriptRoot 'backup-cadence.ps1')
+. (Join-Path $PSScriptRoot 'desktop-controls-health.ps1')
 
 if (-not $JobStart) {
     Write-Output 'Session manager requires -JobStart.'
@@ -28,6 +29,7 @@ $lastBackupFile = Join-Path $env:DEVBOX_CONTROL_PATH 'last-backup.json'
 # First canary/backup proof already ran before this manager. Never use a
 # missing, corrupt, or stale receipt file as the scheduling clock.
 $lastPeriodicAttemptUtc = [DateTime]::UtcNow
+$lastControlsCheckUtc = [DateTime]::UtcNow
 
 function Write-Heartbeat {
     $utcNow = [DateTime]::UtcNow
@@ -57,6 +59,10 @@ if ([DateTime]::UtcNow -ge $deadline) {
 if ([string]::IsNullOrWhiteSpace($env:RESTIC_PASSWORD)) {
     Stop-DevBox 'Session manager has no backup password; cannot promise periodic saves.'
 }
+# Controls must be functional before READY, not merely installed once.
+if (-not (Repair-DevBoxDesktopControls -ScriptsRoot $PSScriptRoot)) {
+    Stop-DevBox 'Save and Finish desktop links are unavailable. Refusing false READY.'
+}
 # Health-check must see a real, current heartbeat before declaring readiness.
 Write-Heartbeat
 & (Join-Path $PSScriptRoot 'health-check.ps1')
@@ -77,6 +83,14 @@ while ($true) {
     Start-Sleep -Seconds 10
     Write-Heartbeat
     $now = [DateTime]::UtcNow
+
+    # Keep both desktop controls available throughout the live RDP session.
+    if (($now - $lastControlsCheckUtc).TotalSeconds -ge 60) {
+        $lastControlsCheckUtc = $now
+        if (-not (Repair-DevBoxDesktopControls -ScriptsRoot $PSScriptRoot)) {
+            Write-DevBox WARN 'Desktop Save/Finish controls not healthy; retrying in one minute.'
+        }
+    }
 
     if ($now -ge $deadline -or $now -ge $forceStop) {
         Write-DevBox WARN 'Session deadline reached. Attempting final backup before the runner closes.'
