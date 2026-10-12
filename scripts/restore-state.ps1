@@ -152,11 +152,16 @@ try {
     }
     if ($dbSnapshots.Count -eq 1) {
         $targetDb = Join-Path $env:USERPROFILE '.local\share\opencode\opencode.db'
-        & python (Join-Path $PSScriptRoot 'snapshot-opencode-db.py') $dbSnapshots[0].FullName $targetDb
-        if ($LASTEXITCODE -ne 0) {
-            Stop-DevBox 'OpenCode DB restore/integrity check failed.'
+        $recoveryDir = Join-Path $env:DEVBOX_WSROOT 'PersistentData\OpenCodeRecovery'
+        & python (Join-Path $PSScriptRoot 'restore-opencode-db.py') $dbSnapshots[0].FullName $targetDb $recoveryDir
+        $historyExit = $LASTEXITCODE
+        if ($historyExit -eq 3) {
+            Write-DevBox WARN 'OpenCode session DB could not replace a locked/inaccessible live database. A verified SQLite recovery copy was retained in PersistentData\OpenCodeRecovery. Do not claim conversations loaded; resolve and import after closing OpenCode.'
+        } elseif ($historyExit -ne 0) {
+            Stop-DevBox 'OpenCode DB restore and safe recovery both failed. Original Restic snapshot remains untouched.'
+        } else {
+            Write-DevBox OK 'Restored consistent OpenCode session history SQLite database.'
         }
-        Write-DevBox OK 'Restored consistent OpenCode session history SQLite database.'
     } else {
         Write-DevBox INFO 'No saved OpenCode v2 SQLite history in this snapshot.'
     }
