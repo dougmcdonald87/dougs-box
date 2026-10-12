@@ -21,7 +21,7 @@ function Assert-OpenCodeGlobalCommand {
     $machinePath = [Environment]::GetEnvironmentVariable('Path', 'Machine')
     $entries = @($machinePath -split ';' | Where-Object { $_.Trim() })
     if (-not @($entries | Where-Object {
-        $_.TrimEnd('\\') -ieq $Directory.TrimEnd('\\')
+        $_.TrimEnd([char]92) -ieq $Directory.TrimEnd([char]92)
     }).Count) {
         [Environment]::SetEnvironmentVariable('Path', "$Directory;$machinePath", 'Machine')
     }
