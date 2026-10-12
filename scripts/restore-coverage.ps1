@@ -17,7 +17,7 @@ function Assert-DevBoxRestoreCoverage {
         try { $obj = ([string]$line) | ConvertFrom-Json -ErrorAction Stop } catch { continue }
         if ([string]$obj.type -ne 'file') { continue }
         $observedNodes++
-        $p = ([string]$obj.path).Replace('\\','/').ToLowerInvariant()
+        $p = ([string]$obj.path).Replace([char]92, '/').ToLowerInvariant()
         foreach ($name in @('Projects','Workspace','PersistentData')) {
             if ($p -match ('(^|/)devbox/' + $name.ToLowerInvariant() + '/')) {
                 $expected[$name]++
