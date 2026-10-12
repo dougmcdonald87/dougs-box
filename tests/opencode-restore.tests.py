@@ -1,5 +1,6 @@
 """Falsifiers for restoration of an unreadable or Windows-locked OpenCode DB."""
 import importlib.util
+from contextlib import closing
 from unittest import mock
 import pathlib
 import sqlite3
@@ -15,7 +16,7 @@ spec.loader.exec_module(helper)
 
 def make_db(path, text):
     path.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(path) as db:
+    with closing(sqlite3.connect(path)) as db:
         db.execute("CREATE TABLE sessions (id TEXT)")
         db.execute("INSERT INTO sessions VALUES (?)", (text,))
         db.commit()
