@@ -3,6 +3,7 @@ import importlib.util
 from unittest import mock
 import pathlib
 import sqlite3
+import sys
 import tempfile
 import unittest
 
@@ -65,6 +66,29 @@ class RecoverTests(unittest.TestCase):
             with self.assertRaises(sqlite3.DatabaseError):
                 helper.restore(source, dest, root / "rescue")
             self.assertEqual([("last-good",)], rows(dest))
+
+
+    @unittest.skipUnless(sys.platform == "win32", "Windows locking semantics only")
+    def test_real_windows_handle_lock_keeps_old_db_and_preserves_new_history(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = pathlib.Path(folder)
+            source = root / "saved.db"
+            dest = root / "live" / "opencode.db"
+            rescue = root / "recovery"
+            make_db(source, "staged-new-history")
+            make_db(dest, "currently-open-history")
+            connection = sqlite3.connect(str(dest))
+            try:
+                connection.execute("BEGIN IMMEDIATE")
+                status = helper.restore(source, dest, rescue)
+                self.assertEqual(3, status, "A live Windows SQLite handle should prevent atomic replacement")
+                self.assertEqual([("currently-open-history",)], connection.execute("SELECT id FROM sessions").fetchall())
+            finally:
+                connection.rollback()
+                connection.close()
+            preserved = list(rescue.glob("opencode-recovery-*.db"))
+            self.assertEqual(1, len(preserved))
+            self.assertEqual([("staged-new-history",)], rows(preserved[0]))
 
 
 if __name__ == "__main__":
