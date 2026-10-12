@@ -178,6 +178,10 @@ jobs:
         shell: pwsh
         run: ./tests/drive-data.tests.ps1
 
+      - name: Real Windows SQLite handle lock and safe OpenCode recovery
+        shell: pwsh
+        run: python tests/opencode-restore.tests.py
+
       - name: Install and inspect both public desktop shortcuts
         shell: pwsh
         run: |
