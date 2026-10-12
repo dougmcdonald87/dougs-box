@@ -97,7 +97,12 @@ function Import-DevBoxDriveRoots {
     $oldBase = $oldWorkspace.Substring(0, $oldWorkspace.Length - $workspaceTail.Length).TrimEnd('\')
     # Real DevBox snapshots originate at D:\DevBox or E:\DevBox.
     # Isolated CI fixtures intentionally use nested ephemeral roots.
-    if ($oldBase -notmatch '^[A-Za-z]:
+    if ($oldBase -notmatch '^[A-Za-z]:$') {
+        if ($env:DEVBOX_ISOLATED_TEST -ne '1' -or
+            $oldBase -notmatch '^[A-Za-z]:\\') {
+            throw 'Saved drive root is invalid for production.'
+        }
+    }
     $oldLetter = $oldBase.Substring(0,1)
     $blocked = @('a','_temp','_work','_tool','hostedtoolcache','runner','agent',
         'System Volume Information','$RECYCLE.BIN','Windows','WindowsApps',
