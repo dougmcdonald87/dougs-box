@@ -475,3 +475,29 @@ jobs:
           if (-not (Test-DevBoxDesktopControls)) { throw 'Startup passed despite missing desktop controls.' }
           Write-Output 'WINDOWS SESSION MANAGER READINESS SMOKE: PASS'
 
+
+
+  windows-terminal:
+    name: Windows terminal real authentication and command test
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 12
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+      - name: Install pinned SSH test client
+        shell: pwsh
+        run: python -m pip install --disable-pip-version-check paramiko==4.0.0
+      - name: Attack stopped server, password, host key and repeated setup
+        shell: pwsh
+        env:
+          TERMINAL_TEST_PASSWORD: 'Disposable!Terminal2026#Only'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $env:DEVBOX_ISOLATED_TEST = '1'
+          $env:DEVBOX_CONTROL_PATH = Join-Path $env:RUNNER_TEMP 'TerminalProof'
+          New-Item -ItemType Directory -Path $env:DEVBOX_CONTROL_PATH -Force | Out-Null
+          Set-LocalUser -Name runneradmin -Password (ConvertTo-SecureString $env:TERMINAL_TEST_PASSWORD -AsPlainText -Force)
+          python tests/windows-terminal.tests.py
+          if ($LASTEXITCODE -ne 0) { throw 'Real Windows terminal test failed.' }
