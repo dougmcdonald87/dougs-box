@@ -1,236 +1,76 @@
-# drive-data.ps1 — persistent user-data roots on the disposable workspace drive.
-# Save every top-level user-data entry (including the complete DevBox tree)
-# without capturing GitHub runner internals, OS metadata or staging/temp files.
+# Portable scope for selected Windows workspace volume; never a full-system image.
 Set-StrictMode -Version Latest
 
 function Get-DevBoxDriveRoots {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$DriveRoot,
           [Parameter(Mandatory)][string]$WorkspaceRoot)
-    if ($DriveRoot -match '^[A-Za-z]:
-        throw "Selected workspace volume missing: $DriveRoot"
-    }
-    $rootFull = [IO.Path]::GetFullPath($DriveRoot).TrimEnd('\')
-    $workspaceFull = [IO.Path]::GetFullPath($WorkspaceRoot).TrimEnd('\')
-    if (-not $workspaceFull.StartsWith($rootFull + '\', [StringComparison]::OrdinalIgnoreCase)) {
-        throw 'Workspace does not reside beneath the selected drive data root.'
-    }
-    $relativeWorkspace = $workspaceFull.Substring($rootFull.Length).TrimStart('\')
-    if ($relativeWorkspace.Contains('\')) {
-        if ($env:DEVBOX_ISOLATED_TEST -ne '1') {
-            throw 'Production workspace must be directly beneath selected drive root.'
-        }
-    }
-    # Protect the GitHub runner, Windows/volume metadata, and other machine
-    # infrastructure. Treat excluded roots as NOT SAVED, never claim full disk.
-    $excluded = @(
-        'a', '_temp', '_work', '_tool', 'hostedtoolcache', 'agent', 'runner',
-        '$RECYCLE.BIN', 'System Volume Information',
-        'Windows', 'WindowsApps', 'Program Files', 'Program Files (x86)',
-        'ProgramData', 'PerfLogs', 'pagefile.sys', 'swapfile.sys', 'hiberfil.sys'
-    )
-    $roots = @()
-    $skipped = @()
-    $scanRoot = if ($rootFull -match '^[A-Za-z]:
-        if ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) {
-            $skipped += $entry.Name + ' (reparse/link)'
-            continue
-        }
-        if ($excluded -contains $entry.Name) {
-            $skipped += $entry.Name + ' (runner/system)'
-            continue
-        }
-        $roots += $entry.FullName
-    }
-    if ($roots -notcontains $workspaceFull) {
-        throw 'Managed DevBox workspace was missing from the drive coverage set.'
-    }
-    # Workspace backup deliberately excludes these disposable/runtime subtrees.
-    $subtreeExcludes = @('Temp', 'ResticCache', 'Control')
-    $patterns = @()
-    foreach ($part in $subtreeExcludes) {
-        # Match exact folder and descendants under the managed DevBox root.
-        $pattern = $workspaceFull.Replace('\','/') + '/' + $part
-        $patterns += $pattern
-        $patterns += $pattern + '/**'
-    }
-    [pscustomobject]@{
-        Roots = @($roots)
-        ExcludePatterns = @($patterns)
-        Skipped = @($skipped)
-        DriveRoot = $rootFull
-        WorkspaceRoot = $workspaceFull
-    }
-}
-
-function Copy-DevBoxStagedEntry {
-    [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$Source,
-          [Parameter(Mandatory)][string]$Destination,
-          [Parameter(Mandatory)][string]$WorkspaceRoot)
-    if (-not (Test-Path -LiteralPath $Source)) { throw "Saved staged path is missing: $Source" }
-    # Never follow a restored reparse point into a different volume or user dir.
-    $links = @(Get-Item -LiteralPath $Source -Force)
-    if (Test-Path -LiteralPath $Source -PathType Container) {
-        $links += @(Get-ChildItem -LiteralPath $Source -Recurse -Force -ErrorAction Stop |
-            Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint })
-    }
-    if (@($links | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint }).Count -gt 0) {
-        throw 'Saved user-data tree contains a reparse point: refusing unsafe automatic import.'
-    }
-    if (Test-Path -LiteralPath $Source -PathType Container) {
-        New-Item -ItemType Directory -Path $Destination -Force | Out-Null
-        foreach ($child in @(Get-ChildItem -LiteralPath $Source -Force -ErrorAction Stop)) {
-            # Do not import prior-run tools/control/temp over current live runner.
-            if ($Destination.TrimEnd('\') -ieq $WorkspaceRoot.TrimEnd('\') -and
-                $child.Name -in @('Temp', 'ResticCache', 'Control')) { continue }
-            Copy-Item -LiteralPath $child.FullName -Destination (Join-Path $Destination $child.Name) -Recurse -Force -ErrorAction Stop
-        }
-    } else {
-        New-Item -ItemType Directory -Path (Split-Path $Destination -Parent) -Force | Out-Null
-        Copy-Item -LiteralPath $Source -Destination $Destination -Force -ErrorAction Stop
-    }
-}
-
-function Import-DevBoxDriveRoots {
-    [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$StagingRoot,
-          [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$SnapshotPaths,
-          [Parameter(Mandatory)][string]$DriveRoot,
-          [Parameter(Mandatory)][string]$WorkspaceRoot)
-    if ($DriveRoot -match '^[A-Za-z]:
-    $destWorkspace = [IO.Path]::GetFullPath($WorkspaceRoot).TrimEnd('\')
-    $workspaceTail = $destWorkspace.Substring($destRoot.Length).TrimStart('\')
-    $workspaceManifest = @($SnapshotPaths | Where-Object {
-        [string]$_ -match '^[A-Za-z]:[\\/]' -and
-        ([string]$_).Replace('/','\').EndsWith('\' + $workspaceTail, [StringComparison]::OrdinalIgnoreCase)
-    })
-    if ($workspaceManifest.Count -eq 0) {
-        # Legacy backup had separately backed Projects/Workspace rather than
-        # the whole workspace root; caller must use its legacy importer.
-        return $false
-    }
-    if ($workspaceManifest.Count -ne 1) { throw 'Ambiguous prior managed workspace roots in snapshot.' }
-    $oldWorkspace = ([string]$workspaceManifest[0]).Replace('/','\')
-    $oldBase = $oldWorkspace.Substring(0, $oldWorkspace.Length - $workspaceTail.Length).TrimEnd('\')
-    $oldDrive = $oldBase.Substring(0,1)
-    $allowed = @('a', '_temp', '_work', '_tool', 'hostedtoolcache', 'agent', 'runner',
-        '$RECYCLE.BIN','System Volume Information','Windows','WindowsApps',
-        'Program Files','Program Files (x86)','ProgramData','PerfLogs')
-    $imported = 0
-    foreach ($original in $SnapshotPaths) {
-        $normalized = ([string]$original).Replace('/','\')
-        if (-not $normalized.StartsWith($oldBase + '\', [StringComparison]::OrdinalIgnoreCase)) { continue }
-        $relative = $normalized.Substring($oldBase.Length).TrimStart('\')
-        $segments = @($relative.Split('\'))
-        if (-not $relative -or @($segments | Where-Object { -not $_ -or $_ -in @('.','..') }).Count -gt 0) {
-            throw 'Unsafe old drive path in snapshot manifest.'
-        }
-        if ($segments[0] -in $allowed) {
-            throw 'Unexpected runner or system path in claimed user backup; refusing automatic import.'
-        }
-        # No path can escape the selected new drive root.
-        $destination = [IO.Path]::GetFullPath((Join-Path $destRoot $relative))
-        if (-not $destination.StartsWith($destRoot + '\', [StringComparison]::OrdinalIgnoreCase)) {
-            throw 'Restore destination escaped selected drive root.'
-        }
-        $oldPathTail = $normalized.Substring(3)
-        $stageOne = Join-Path $StagingRoot (Join-Path $oldDrive $oldPathTail)
-        $stageTwo = Join-Path $StagingRoot $oldPathTail
-        $matches = @(@($stageOne, $stageTwo) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -Unique)
-        if ($matches.Count -ne 1) {
-            throw "Expected exactly one staged backup root for $relative; found $($matches.Count)."
-        }
-        Copy-DevBoxStagedEntry -Source $matches[0] -Destination $destination -WorkspaceRoot $destWorkspace
-        $imported++
-        Write-Host "DRIVE DATA RESTORED: $relative"
-    }
-    if ($imported -eq 0) { throw 'Workspace manifest found but nothing imported.' }
-    return $true
-}
-) { $DriveRoot = $DriveRoot + '\\' }
+    if ($DriveRoot -match '^[A-Za-z]:$') { $DriveRoot += '\' }
     if (-not (Test-Path -LiteralPath $DriveRoot -PathType Container)) {
-        throw "Selected workspace volume missing: $DriveRoot"
+        throw "Selected data drive is not accessible: $DriveRoot"
     }
-    $rootFull = [IO.Path]::GetFullPath($DriveRoot).TrimEnd('\')
-    $workspaceFull = [IO.Path]::GetFullPath($WorkspaceRoot).TrimEnd('\')
-    if (-not $workspaceFull.StartsWith($rootFull + '\', [StringComparison]::OrdinalIgnoreCase)) {
-        throw 'Workspace does not reside beneath the selected drive data root.'
+    $base = [IO.Path]::GetFullPath($DriveRoot).TrimEnd('\')
+    $workspace = [IO.Path]::GetFullPath($WorkspaceRoot).TrimEnd('\')
+    if (-not $workspace.StartsWith($base + '\', [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Managed workspace outside selected drive.'
     }
-    $relativeWorkspace = $workspaceFull.Substring($rootFull.Length).TrimStart('\')
-    if ($relativeWorkspace.Contains('\')) {
-        if ($env:DEVBOX_ISOLATED_TEST -ne '1') {
-            throw 'Production workspace must be directly beneath selected drive root.'
-        }
+    $subpath = $workspace.Substring($base.Length).TrimStart('\')
+    if ($env:DEVBOX_ISOLATED_TEST -ne '1' -and $subpath -ne 'DevBox') {
+        throw 'Production workspace must be immediately under selected drive.'
     }
-    # Protect the GitHub runner, Windows/volume metadata, and other machine
-    # infrastructure. Treat excluded roots as NOT SAVED, never claim full disk.
-    $excluded = @(
-        'a', '_temp', '_work', '_tool', 'hostedtoolcache', 'agent', 'runner',
-        '$RECYCLE.BIN', 'System Volume Information',
-        'Windows', 'WindowsApps', 'Program Files', 'Program Files (x86)',
-        'ProgramData', 'PerfLogs', 'pagefile.sys', 'swapfile.sys', 'hiberfil.sys'
-    )
+    $excluded = @('a','_temp','_work','_tool','hostedtoolcache','runner','agent',
+        'System Volume Information','$RECYCLE.BIN','Windows','WindowsApps',
+        'Program Files','Program Files (x86)','ProgramData','PerfLogs',
+        'pagefile.sys','swapfile.sys','hiberfil.sys')
+    $enumerate = if ($base -match '^[A-Za-z]:$') { $base + '\' } else { $base }
     $roots = @()
     $skipped = @()
-    foreach ($entry in @(Get-ChildItem -LiteralPath $rootFull -Force -ErrorAction Stop)) {
-        if ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) {
-            $skipped += $entry.Name + ' (reparse/link)'
+    foreach ($item in @(Get-ChildItem -LiteralPath $enumerate -Force -ErrorAction Stop)) {
+        if ($item.Name -in $excluded) { $skipped += $item.Name; continue }
+        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            $skipped += $item.Name + ' (reparse)'
             continue
         }
-        if ($excluded -contains $entry.Name) {
-            $skipped += $entry.Name + ' (runner/system)'
-            continue
-        }
-        $roots += $entry.FullName
+        $roots += $item.FullName
     }
-    if ($roots -notcontains $workspaceFull) {
-        throw 'Managed DevBox workspace was missing from the drive coverage set.'
+    if (@($roots | Where-Object { $_ -ieq $workspace }).Count -ne 1) {
+        throw 'Managed DevBox root not present in backup scope.'
     }
-    # Workspace backup deliberately excludes these disposable/runtime subtrees.
-    $subtreeExcludes = @('Temp', 'ResticCache', 'Control')
+    # GitHub-runner runtime components are rebuilt each startup.
     $patterns = @()
-    foreach ($part in $subtreeExcludes) {
-        # Match exact folder and descendants under the managed DevBox root.
-        $pattern = $workspaceFull.Replace('\','/') + '/' + $part
-        $patterns += $pattern
-        $patterns += $pattern + '/**'
+    foreach ($name in @('Temp','ResticCache','Control','Tools')) {
+        $p = $workspace.Replace('\','/') + '/' + $name
+        $patterns += @($p, ($p + '/**'))
     }
     [pscustomobject]@{
         Roots = @($roots)
-        ExcludePatterns = @($patterns)
         Skipped = @($skipped)
-        DriveRoot = $rootFull
-        WorkspaceRoot = $workspaceFull
+        ExcludePatterns = @($patterns)
+        WorkspaceRoot = $workspace
     }
 }
 
-function Copy-DevBoxStagedEntry {
+function Merge-DevBoxStagedTree {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Source,
-          [Parameter(Mandatory)][string]$Destination,
+          [Parameter(Mandatory)][string]$Target,
           [Parameter(Mandatory)][string]$WorkspaceRoot)
-    if (-not (Test-Path -LiteralPath $Source)) { throw "Saved staged path is missing: $Source" }
-    # Never follow a restored reparse point into a different volume or user dir.
-    $links = @(Get-Item -LiteralPath $Source -Force)
-    if (Test-Path -LiteralPath $Source -PathType Container) {
-        $links += @(Get-ChildItem -LiteralPath $Source -Recurse -Force -ErrorAction Stop |
-            Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint })
+    $item = Get-Item -LiteralPath $Source -Force -ErrorAction Stop
+    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw 'Reparse point in staged data. Refusing unsafe copy.'
     }
-    if (@($links | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint }).Count -gt 0) {
-        throw 'Saved user-data tree contains a reparse point: refusing unsafe automatic import.'
-    }
-    if (Test-Path -LiteralPath $Source -PathType Container) {
-        New-Item -ItemType Directory -Path $Destination -Force | Out-Null
+    if ($item.PSIsContainer) {
+        if (-not (Test-Path -LiteralPath $Target -PathType Container)) {
+            New-Item -ItemType Directory -Path $Target -Force | Out-Null
+        }
         foreach ($child in @(Get-ChildItem -LiteralPath $Source -Force -ErrorAction Stop)) {
-            # Do not import prior-run tools/control/temp over current live runner.
-            if ($Destination.TrimEnd('\') -ieq $WorkspaceRoot.TrimEnd('\') -and
-                $child.Name -in @('Temp', 'ResticCache', 'Control')) { continue }
-            Copy-Item -LiteralPath $child.FullName -Destination (Join-Path $Destination $child.Name) -Recurse -Force -ErrorAction Stop
+            if ($Target.TrimEnd('\') -ieq $WorkspaceRoot.TrimEnd('\') -and
+                $child.Name -in @('Temp','ResticCache','Control','Tools')) { continue }
+            Merge-DevBoxStagedTree -Source $child.FullName -Target (Join-Path $Target $child.Name) -WorkspaceRoot $WorkspaceRoot
         }
     } else {
-        New-Item -ItemType Directory -Path (Split-Path $Destination -Parent) -Force | Out-Null
-        Copy-Item -LiteralPath $Source -Destination $Destination -Force -ErrorAction Stop
+        New-Item -ItemType Directory -Path (Split-Path $Target -Parent) -Force | Out-Null
+        Copy-Item -LiteralPath $Source -Destination $Target -Force -ErrorAction Stop
     }
 }
 
@@ -240,766 +80,48 @@ function Import-DevBoxDriveRoots {
           [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$SnapshotPaths,
           [Parameter(Mandatory)][string]$DriveRoot,
           [Parameter(Mandatory)][string]$WorkspaceRoot)
-    $destRoot = [IO.Path]::GetFullPath($DriveRoot).TrimEnd('\')
-    $destWorkspace = [IO.Path]::GetFullPath($WorkspaceRoot).TrimEnd('\')
-    $workspaceTail = $destWorkspace.Substring($destRoot.Length).TrimStart('\')
-    $workspaceManifest = @($SnapshotPaths | Where-Object {
-        [string]$_ -match '^[A-Za-z]:[\\/]' -and
+    if ($DriveRoot -match '^[A-Za-z]:$') { $DriveRoot += '\' }
+    $currentBase = [IO.Path]::GetFullPath($DriveRoot).TrimEnd('\')
+    $workspace = [IO.Path]::GetFullPath($WorkspaceRoot).TrimEnd('\')
+    if (-not $workspace.StartsWith($currentBase + '\', [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Restore workspace outside current drive.'
+    }
+    $workspaceTail = $workspace.Substring($currentBase.Length).TrimStart('\')
+    $matches = @($SnapshotPaths | Where-Object {
+        ([string]$_) -match '^[A-Za-z]:[\\/]' -and
         ([string]$_).Replace('/','\').EndsWith('\' + $workspaceTail, [StringComparison]::OrdinalIgnoreCase)
     })
-    if ($workspaceManifest.Count -eq 0) {
-        # Legacy backup had separately backed Projects/Workspace rather than
-        # the whole workspace root; caller must use its legacy importer.
-        return $false
-    }
-    if ($workspaceManifest.Count -ne 1) { throw 'Ambiguous prior managed workspace roots in snapshot.' }
-    $oldWorkspace = ([string]$workspaceManifest[0]).Replace('/','\')
+    if ($matches.Count -eq 0) { return $false } # legacy snapshot
+    if ($matches.Count -ne 1) { throw 'Multiple saved workspace roots in snapshot manifest.' }
+    $oldWorkspace = ([string]$matches[0]).Replace('/','\')
     $oldBase = $oldWorkspace.Substring(0, $oldWorkspace.Length - $workspaceTail.Length).TrimEnd('\')
-    $oldDrive = $oldBase.Substring(0,1)
-    $allowed = @('a', '_temp', '_work', '_tool', 'hostedtoolcache', 'agent', 'runner',
-        '$RECYCLE.BIN','System Volume Information','Windows','WindowsApps',
+    if ($oldBase -notmatch '^[A-Za-z]:$') { throw 'Saved drive root is malformed.' }
+    $oldLetter = $oldBase.Substring(0,1)
+    $blocked = @('a','_temp','_work','_tool','hostedtoolcache','runner','agent',
+        'System Volume Information','$RECYCLE.BIN','Windows','WindowsApps',
         'Program Files','Program Files (x86)','ProgramData','PerfLogs')
-    $imported = 0
-    foreach ($original in $SnapshotPaths) {
-        $normalized = ([string]$original).Replace('/','\')
-        if (-not $normalized.StartsWith($oldBase + '\', [StringComparison]::OrdinalIgnoreCase)) { continue }
-        $relative = $normalized.Substring($oldBase.Length).TrimStart('\')
-        $segments = @($relative.Split('\'))
-        if (-not $relative -or @($segments | Where-Object { -not $_ -or $_ -in @('.','..') }).Count -gt 0) {
-            throw 'Unsafe old drive path in snapshot manifest.'
+    $count = 0
+    foreach ($manifestPath in $SnapshotPaths) {
+        $oldPath = ([string]$manifestPath).Replace('/','\')
+        if (-not $oldPath.StartsWith($oldBase + '\', [StringComparison]::OrdinalIgnoreCase)) { continue }
+        $relative = $oldPath.Substring($oldBase.Length).TrimStart('\')
+        $components = @($relative -split '\\')
+        if (-not $relative -or @($components | Where-Object { $_ -eq '' -or $_ -eq '.' -or $_ -eq '..' }).Count) {
+            throw 'Unsafe source path in saved manifest.'
         }
-        if ($segments[0] -in $allowed) {
-            throw 'Unexpected runner or system path in claimed user backup; refusing automatic import.'
+        if ($components[0] -in $blocked) { throw 'Saved manifest unexpectedly contains runner/system root.' }
+        $target = [IO.Path]::GetFullPath((Join-Path ($currentBase + '\') $relative))
+        if (-not $target.StartsWith($currentBase + '\', [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Restored data would escape selected drive.'
         }
-        # No path can escape the selected new drive root.
-        $destination = [IO.Path]::GetFullPath((Join-Path $destRoot $relative))
-        if (-not $destination.StartsWith($destRoot + '\', [StringComparison]::OrdinalIgnoreCase)) {
-            throw 'Restore destination escaped selected drive root.'
-        }
-        $oldPathTail = $normalized.Substring(3)
-        $stageOne = Join-Path $StagingRoot (Join-Path $oldDrive $oldPathTail)
-        $stageTwo = Join-Path $StagingRoot $oldPathTail
-        $matches = @(@($stageOne, $stageTwo) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -Unique)
-        if ($matches.Count -ne 1) {
-            throw "Expected exactly one staged backup root for $relative; found $($matches.Count)."
-        }
-        Copy-DevBoxStagedEntry -Source $matches[0] -Destination $destination -WorkspaceRoot $destWorkspace
-        $imported++
-        Write-Output "DRIVE DATA RESTORED: $relative"
+        $tail = $oldPath.Substring(3)
+        $from = @( (Join-Path $StagingRoot (Join-Path $oldLetter $tail)), (Join-Path $StagingRoot $tail) )
+        $existing = @($from | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -Unique)
+        if ($existing.Count -ne 1) { throw "Missing or ambiguous staged source for $relative" }
+        Merge-DevBoxStagedTree -Source $existing[0] -Target $target -WorkspaceRoot $workspace
+        $count++
+        Write-Host "DRIVE RESTORE VERIFIED ROOT: $relative"
     }
-    if ($imported -eq 0) { throw 'Workspace manifest found but nothing imported.' }
-    return $true
-}
-) { $rootFull + '\\' } else { $rootFull }
-    foreach ($entry in @(Get-ChildItem -LiteralPath $scanRoot -Force -ErrorAction Stop)) {
-        if ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) {
-            $skipped += $entry.Name + ' (reparse/link)'
-            continue
-        }
-        if ($excluded -contains $entry.Name) {
-            $skipped += $entry.Name + ' (runner/system)'
-            continue
-        }
-        $roots += $entry.FullName
-    }
-    if ($roots -notcontains $workspaceFull) {
-        throw 'Managed DevBox workspace was missing from the drive coverage set.'
-    }
-    # Workspace backup deliberately excludes these disposable/runtime subtrees.
-    $subtreeExcludes = @('Temp', 'ResticCache', 'Control')
-    $patterns = @()
-    foreach ($part in $subtreeExcludes) {
-        # Match exact folder and descendants under the managed DevBox root.
-        $pattern = $workspaceFull.Replace('\','/') + '/' + $part
-        $patterns += $pattern
-        $patterns += $pattern + '/**'
-    }
-    [pscustomobject]@{
-        Roots = @($roots)
-        ExcludePatterns = @($patterns)
-        Skipped = @($skipped)
-        DriveRoot = $rootFull
-        WorkspaceRoot = $workspaceFull
-    }
-}
-
-function Copy-DevBoxStagedEntry {
-    [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$Source,
-          [Parameter(Mandatory)][string]$Destination,
-          [Parameter(Mandatory)][string]$WorkspaceRoot)
-    if (-not (Test-Path -LiteralPath $Source)) { throw "Saved staged path is missing: $Source" }
-    # Never follow a restored reparse point into a different volume or user dir.
-    $links = @(Get-Item -LiteralPath $Source -Force)
-    if (Test-Path -LiteralPath $Source -PathType Container) {
-        $links += @(Get-ChildItem -LiteralPath $Source -Recurse -Force -ErrorAction Stop |
-            Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint })
-    }
-    if (@($links | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint }).Count -gt 0) {
-        throw 'Saved user-data tree contains a reparse point: refusing unsafe automatic import.'
-    }
-    if (Test-Path -LiteralPath $Source -PathType Container) {
-        New-Item -ItemType Directory -Path $Destination -Force | Out-Null
-        foreach ($child in @(Get-ChildItem -LiteralPath $Source -Force -ErrorAction Stop)) {
-            # Do not import prior-run tools/control/temp over current live runner.
-            if ($Destination.TrimEnd('\') -ieq $WorkspaceRoot.TrimEnd('\') -and
-                $child.Name -in @('Temp', 'ResticCache', 'Control')) { continue }
-            Copy-Item -LiteralPath $child.FullName -Destination (Join-Path $Destination $child.Name) -Recurse -Force -ErrorAction Stop
-        }
-    } else {
-        New-Item -ItemType Directory -Path (Split-Path $Destination -Parent) -Force | Out-Null
-        Copy-Item -LiteralPath $Source -Destination $Destination -Force -ErrorAction Stop
-    }
-}
-
-function Import-DevBoxDriveRoots {
-    [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$StagingRoot,
-          [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$SnapshotPaths,
-          [Parameter(Mandatory)][string]$DriveRoot,
-          [Parameter(Mandatory)][string]$WorkspaceRoot)
-    $destRoot = [IO.Path]::GetFullPath($DriveRoot).TrimEnd('\')
-    $destWorkspace = [IO.Path]::GetFullPath($WorkspaceRoot).TrimEnd('\')
-    $workspaceTail = $destWorkspace.Substring($destRoot.Length).TrimStart('\')
-    $workspaceManifest = @($SnapshotPaths | Where-Object {
-        [string]$_ -match '^[A-Za-z]:[\\/]' -and
-        ([string]$_).Replace('/','\').EndsWith('\' + $workspaceTail, [StringComparison]::OrdinalIgnoreCase)
-    })
-    if ($workspaceManifest.Count -eq 0) {
-        # Legacy backup had separately backed Projects/Workspace rather than
-        # the whole workspace root; caller must use its legacy importer.
-        return $false
-    }
-    if ($workspaceManifest.Count -ne 1) { throw 'Ambiguous prior managed workspace roots in snapshot.' }
-    $oldWorkspace = ([string]$workspaceManifest[0]).Replace('/','\')
-    $oldBase = $oldWorkspace.Substring(0, $oldWorkspace.Length - $workspaceTail.Length).TrimEnd('\')
-    $oldDrive = $oldBase.Substring(0,1)
-    $allowed = @('a', '_temp', '_work', '_tool', 'hostedtoolcache', 'agent', 'runner',
-        '$RECYCLE.BIN','System Volume Information','Windows','WindowsApps',
-        'Program Files','Program Files (x86)','ProgramData','PerfLogs')
-    $imported = 0
-    foreach ($original in $SnapshotPaths) {
-        $normalized = ([string]$original).Replace('/','\')
-        if (-not $normalized.StartsWith($oldBase + '\', [StringComparison]::OrdinalIgnoreCase)) { continue }
-        $relative = $normalized.Substring($oldBase.Length).TrimStart('\')
-        $segments = @($relative.Split('\'))
-        if (-not $relative -or @($segments | Where-Object { -not $_ -or $_ -in @('.','..') }).Count -gt 0) {
-            throw 'Unsafe old drive path in snapshot manifest.'
-        }
-        if ($segments[0] -in $allowed) {
-            throw 'Unexpected runner or system path in claimed user backup; refusing automatic import.'
-        }
-        # No path can escape the selected new drive root.
-        $destination = [IO.Path]::GetFullPath((Join-Path $destRoot $relative))
-        if (-not $destination.StartsWith($destRoot + '\', [StringComparison]::OrdinalIgnoreCase)) {
-            throw 'Restore destination escaped selected drive root.'
-        }
-        $oldPathTail = $normalized.Substring(3)
-        $stageOne = Join-Path $StagingRoot (Join-Path $oldDrive $oldPathTail)
-        $stageTwo = Join-Path $StagingRoot $oldPathTail
-        $matches = @(@($stageOne, $stageTwo) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -Unique)
-        if ($matches.Count -ne 1) {
-            throw "Expected exactly one staged backup root for $relative; found $($matches.Count)."
-        }
-        Copy-DevBoxStagedEntry -Source $matches[0] -Destination $destination -WorkspaceRoot $destWorkspace
-        $imported++
-        Write-Output "DRIVE DATA RESTORED: $relative"
-    }
-    if ($imported -eq 0) { throw 'Workspace manifest found but nothing imported.' }
-    return $true
-}
-) { $DriveRoot = $DriveRoot + '\\' }
-    if (-not (Test-Path -LiteralPath $DriveRoot -PathType Container)) {
-        throw "Selected workspace volume missing: $DriveRoot"
-    }
-    $rootFull = [IO.Path]::GetFullPath($DriveRoot).TrimEnd('\')
-    $workspaceFull = [IO.Path]::GetFullPath($WorkspaceRoot).TrimEnd('\')
-    if (-not $workspaceFull.StartsWith($rootFull + '\', [StringComparison]::OrdinalIgnoreCase)) {
-        throw 'Workspace does not reside beneath the selected drive data root.'
-    }
-    $relativeWorkspace = $workspaceFull.Substring($rootFull.Length).TrimStart('\')
-    if ($relativeWorkspace.Contains('\')) {
-        if ($env:DEVBOX_ISOLATED_TEST -ne '1') {
-            throw 'Production workspace must be directly beneath selected drive root.'
-        }
-    }
-    # Protect the GitHub runner, Windows/volume metadata, and other machine
-    # infrastructure. Treat excluded roots as NOT SAVED, never claim full disk.
-    $excluded = @(
-        'a', '_temp', '_work', '_tool', 'hostedtoolcache', 'agent', 'runner',
-        '$RECYCLE.BIN', 'System Volume Information',
-        'Windows', 'WindowsApps', 'Program Files', 'Program Files (x86)',
-        'ProgramData', 'PerfLogs', 'pagefile.sys', 'swapfile.sys', 'hiberfil.sys'
-    )
-    $roots = @()
-    $skipped = @()
-    foreach ($entry in @(Get-ChildItem -LiteralPath $rootFull -Force -ErrorAction Stop)) {
-        if ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) {
-            $skipped += $entry.Name + ' (reparse/link)'
-            continue
-        }
-        if ($excluded -contains $entry.Name) {
-            $skipped += $entry.Name + ' (runner/system)'
-            continue
-        }
-        $roots += $entry.FullName
-    }
-    if ($roots -notcontains $workspaceFull) {
-        throw 'Managed DevBox workspace was missing from the drive coverage set.'
-    }
-    # Workspace backup deliberately excludes these disposable/runtime subtrees.
-    $subtreeExcludes = @('Temp', 'ResticCache', 'Control')
-    $patterns = @()
-    foreach ($part in $subtreeExcludes) {
-        # Match exact folder and descendants under the managed DevBox root.
-        $pattern = $workspaceFull.Replace('\','/') + '/' + $part
-        $patterns += $pattern
-        $patterns += $pattern + '/**'
-    }
-    [pscustomobject]@{
-        Roots = @($roots)
-        ExcludePatterns = @($patterns)
-        Skipped = @($skipped)
-        DriveRoot = $rootFull
-        WorkspaceRoot = $workspaceFull
-    }
-}
-
-function Copy-DevBoxStagedEntry {
-    [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$Source,
-          [Parameter(Mandatory)][string]$Destination,
-          [Parameter(Mandatory)][string]$WorkspaceRoot)
-    if (-not (Test-Path -LiteralPath $Source)) { throw "Saved staged path is missing: $Source" }
-    # Never follow a restored reparse point into a different volume or user dir.
-    $links = @(Get-Item -LiteralPath $Source -Force)
-    if (Test-Path -LiteralPath $Source -PathType Container) {
-        $links += @(Get-ChildItem -LiteralPath $Source -Recurse -Force -ErrorAction Stop |
-            Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint })
-    }
-    if (@($links | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint }).Count -gt 0) {
-        throw 'Saved user-data tree contains a reparse point: refusing unsafe automatic import.'
-    }
-    if (Test-Path -LiteralPath $Source -PathType Container) {
-        New-Item -ItemType Directory -Path $Destination -Force | Out-Null
-        foreach ($child in @(Get-ChildItem -LiteralPath $Source -Force -ErrorAction Stop)) {
-            # Do not import prior-run tools/control/temp over current live runner.
-            if ($Destination.TrimEnd('\') -ieq $WorkspaceRoot.TrimEnd('\') -and
-                $child.Name -in @('Temp', 'ResticCache', 'Control')) { continue }
-            Copy-Item -LiteralPath $child.FullName -Destination (Join-Path $Destination $child.Name) -Recurse -Force -ErrorAction Stop
-        }
-    } else {
-        New-Item -ItemType Directory -Path (Split-Path $Destination -Parent) -Force | Out-Null
-        Copy-Item -LiteralPath $Source -Destination $Destination -Force -ErrorAction Stop
-    }
-}
-
-function Import-DevBoxDriveRoots {
-    [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$StagingRoot,
-          [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$SnapshotPaths,
-          [Parameter(Mandatory)][string]$DriveRoot,
-          [Parameter(Mandatory)][string]$WorkspaceRoot)
-    $destRoot = [IO.Path]::GetFullPath($DriveRoot).TrimEnd('\')
-    $destWorkspace = [IO.Path]::GetFullPath($WorkspaceRoot).TrimEnd('\')
-    $workspaceTail = $destWorkspace.Substring($destRoot.Length).TrimStart('\')
-    $workspaceManifest = @($SnapshotPaths | Where-Object {
-        [string]$_ -match '^[A-Za-z]:[\\/]' -and
-        ([string]$_).Replace('/','\').EndsWith('\' + $workspaceTail, [StringComparison]::OrdinalIgnoreCase)
-    })
-    if ($workspaceManifest.Count -eq 0) {
-        # Legacy backup had separately backed Projects/Workspace rather than
-        # the whole workspace root; caller must use its legacy importer.
-        return $false
-    }
-    if ($workspaceManifest.Count -ne 1) { throw 'Ambiguous prior managed workspace roots in snapshot.' }
-    $oldWorkspace = ([string]$workspaceManifest[0]).Replace('/','\')
-    $oldBase = $oldWorkspace.Substring(0, $oldWorkspace.Length - $workspaceTail.Length).TrimEnd('\')
-    $oldDrive = $oldBase.Substring(0,1)
-    $allowed = @('a', '_temp', '_work', '_tool', 'hostedtoolcache', 'agent', 'runner',
-        '$RECYCLE.BIN','System Volume Information','Windows','WindowsApps',
-        'Program Files','Program Files (x86)','ProgramData','PerfLogs')
-    $imported = 0
-    foreach ($original in $SnapshotPaths) {
-        $normalized = ([string]$original).Replace('/','\')
-        if (-not $normalized.StartsWith($oldBase + '\', [StringComparison]::OrdinalIgnoreCase)) { continue }
-        $relative = $normalized.Substring($oldBase.Length).TrimStart('\')
-        $segments = @($relative.Split('\'))
-        if (-not $relative -or @($segments | Where-Object { -not $_ -or $_ -in @('.','..') }).Count -gt 0) {
-            throw 'Unsafe old drive path in snapshot manifest.'
-        }
-        if ($segments[0] -in $allowed) {
-            throw 'Unexpected runner or system path in claimed user backup; refusing automatic import.'
-        }
-        # No path can escape the selected new drive root.
-        $destination = [IO.Path]::GetFullPath((Join-Path $destRoot $relative))
-        if (-not $destination.StartsWith($destRoot + '\', [StringComparison]::OrdinalIgnoreCase)) {
-            throw 'Restore destination escaped selected drive root.'
-        }
-        $oldPathTail = $normalized.Substring(3)
-        $stageOne = Join-Path $StagingRoot (Join-Path $oldDrive $oldPathTail)
-        $stageTwo = Join-Path $StagingRoot $oldPathTail
-        $matches = @(@($stageOne, $stageTwo) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -Unique)
-        if ($matches.Count -ne 1) {
-            throw "Expected exactly one staged backup root for $relative; found $($matches.Count)."
-        }
-        Copy-DevBoxStagedEntry -Source $matches[0] -Destination $destination -WorkspaceRoot $destWorkspace
-        $imported++
-        Write-Output "DRIVE DATA RESTORED: $relative"
-    }
-    if ($imported -eq 0) { throw 'Workspace manifest found but nothing imported.' }
-    return $true
-}
-) { $DriveRoot = $DriveRoot + '\\' }
-    $destRoot = [IO.Path]::GetFullPath($DriveRoot).TrimEnd('\')
-    $destWorkspace = [IO.Path]::GetFullPath($WorkspaceRoot).TrimEnd('\')
-    $workspaceTail = $destWorkspace.Substring($destRoot.Length).TrimStart('\')
-    $workspaceManifest = @($SnapshotPaths | Where-Object {
-        [string]$_ -match '^[A-Za-z]:[\\/]' -and
-        ([string]$_).Replace('/','\').EndsWith('\' + $workspaceTail, [StringComparison]::OrdinalIgnoreCase)
-    })
-    if ($workspaceManifest.Count -eq 0) {
-        # Legacy backup had separately backed Projects/Workspace rather than
-        # the whole workspace root; caller must use its legacy importer.
-        return $false
-    }
-    if ($workspaceManifest.Count -ne 1) { throw 'Ambiguous prior managed workspace roots in snapshot.' }
-    $oldWorkspace = ([string]$workspaceManifest[0]).Replace('/','\')
-    $oldBase = $oldWorkspace.Substring(0, $oldWorkspace.Length - $workspaceTail.Length).TrimEnd('\')
-    $oldDrive = $oldBase.Substring(0,1)
-    $allowed = @('a', '_temp', '_work', '_tool', 'hostedtoolcache', 'agent', 'runner',
-        '$RECYCLE.BIN','System Volume Information','Windows','WindowsApps',
-        'Program Files','Program Files (x86)','ProgramData','PerfLogs')
-    $imported = 0
-    foreach ($original in $SnapshotPaths) {
-        $normalized = ([string]$original).Replace('/','\')
-        if (-not $normalized.StartsWith($oldBase + '\', [StringComparison]::OrdinalIgnoreCase)) { continue }
-        $relative = $normalized.Substring($oldBase.Length).TrimStart('\')
-        $segments = @($relative.Split('\'))
-        if (-not $relative -or @($segments | Where-Object { -not $_ -or $_ -in @('.','..') }).Count -gt 0) {
-            throw 'Unsafe old drive path in snapshot manifest.'
-        }
-        if ($segments[0] -in $allowed) {
-            throw 'Unexpected runner or system path in claimed user backup; refusing automatic import.'
-        }
-        # No path can escape the selected new drive root.
-        $destination = [IO.Path]::GetFullPath((Join-Path $destRoot $relative))
-        if (-not $destination.StartsWith($destRoot + '\', [StringComparison]::OrdinalIgnoreCase)) {
-            throw 'Restore destination escaped selected drive root.'
-        }
-        $oldPathTail = $normalized.Substring(3)
-        $stageOne = Join-Path $StagingRoot (Join-Path $oldDrive $oldPathTail)
-        $stageTwo = Join-Path $StagingRoot $oldPathTail
-        $matches = @(@($stageOne, $stageTwo) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -Unique)
-        if ($matches.Count -ne 1) {
-            throw "Expected exactly one staged backup root for $relative; found $($matches.Count)."
-        }
-        Copy-DevBoxStagedEntry -Source $matches[0] -Destination $destination -WorkspaceRoot $destWorkspace
-        $imported++
-        Write-Output "DRIVE DATA RESTORED: $relative"
-    }
-    if ($imported -eq 0) { throw 'Workspace manifest found but nothing imported.' }
-    return $true
-}
-) { $DriveRoot = $DriveRoot + '\\' }
-    if (-not (Test-Path -LiteralPath $DriveRoot -PathType Container)) {
-        throw "Selected workspace volume missing: $DriveRoot"
-    }
-    $rootFull = [IO.Path]::GetFullPath($DriveRoot).TrimEnd('\')
-    $workspaceFull = [IO.Path]::GetFullPath($WorkspaceRoot).TrimEnd('\')
-    if (-not $workspaceFull.StartsWith($rootFull + '\', [StringComparison]::OrdinalIgnoreCase)) {
-        throw 'Workspace does not reside beneath the selected drive data root.'
-    }
-    $relativeWorkspace = $workspaceFull.Substring($rootFull.Length).TrimStart('\')
-    if ($relativeWorkspace.Contains('\')) {
-        if ($env:DEVBOX_ISOLATED_TEST -ne '1') {
-            throw 'Production workspace must be directly beneath selected drive root.'
-        }
-    }
-    # Protect the GitHub runner, Windows/volume metadata, and other machine
-    # infrastructure. Treat excluded roots as NOT SAVED, never claim full disk.
-    $excluded = @(
-        'a', '_temp', '_work', '_tool', 'hostedtoolcache', 'agent', 'runner',
-        '$RECYCLE.BIN', 'System Volume Information',
-        'Windows', 'WindowsApps', 'Program Files', 'Program Files (x86)',
-        'ProgramData', 'PerfLogs', 'pagefile.sys', 'swapfile.sys', 'hiberfil.sys'
-    )
-    $roots = @()
-    $skipped = @()
-    foreach ($entry in @(Get-ChildItem -LiteralPath $rootFull -Force -ErrorAction Stop)) {
-        if ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) {
-            $skipped += $entry.Name + ' (reparse/link)'
-            continue
-        }
-        if ($excluded -contains $entry.Name) {
-            $skipped += $entry.Name + ' (runner/system)'
-            continue
-        }
-        $roots += $entry.FullName
-    }
-    if ($roots -notcontains $workspaceFull) {
-        throw 'Managed DevBox workspace was missing from the drive coverage set.'
-    }
-    # Workspace backup deliberately excludes these disposable/runtime subtrees.
-    $subtreeExcludes = @('Temp', 'ResticCache', 'Control')
-    $patterns = @()
-    foreach ($part in $subtreeExcludes) {
-        # Match exact folder and descendants under the managed DevBox root.
-        $pattern = $workspaceFull.Replace('\','/') + '/' + $part
-        $patterns += $pattern
-        $patterns += $pattern + '/**'
-    }
-    [pscustomobject]@{
-        Roots = @($roots)
-        ExcludePatterns = @($patterns)
-        Skipped = @($skipped)
-        DriveRoot = $rootFull
-        WorkspaceRoot = $workspaceFull
-    }
-}
-
-function Copy-DevBoxStagedEntry {
-    [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$Source,
-          [Parameter(Mandatory)][string]$Destination,
-          [Parameter(Mandatory)][string]$WorkspaceRoot)
-    if (-not (Test-Path -LiteralPath $Source)) { throw "Saved staged path is missing: $Source" }
-    # Never follow a restored reparse point into a different volume or user dir.
-    $links = @(Get-Item -LiteralPath $Source -Force)
-    if (Test-Path -LiteralPath $Source -PathType Container) {
-        $links += @(Get-ChildItem -LiteralPath $Source -Recurse -Force -ErrorAction Stop |
-            Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint })
-    }
-    if (@($links | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint }).Count -gt 0) {
-        throw 'Saved user-data tree contains a reparse point: refusing unsafe automatic import.'
-    }
-    if (Test-Path -LiteralPath $Source -PathType Container) {
-        New-Item -ItemType Directory -Path $Destination -Force | Out-Null
-        foreach ($child in @(Get-ChildItem -LiteralPath $Source -Force -ErrorAction Stop)) {
-            # Do not import prior-run tools/control/temp over current live runner.
-            if ($Destination.TrimEnd('\') -ieq $WorkspaceRoot.TrimEnd('\') -and
-                $child.Name -in @('Temp', 'ResticCache', 'Control')) { continue }
-            Copy-Item -LiteralPath $child.FullName -Destination (Join-Path $Destination $child.Name) -Recurse -Force -ErrorAction Stop
-        }
-    } else {
-        New-Item -ItemType Directory -Path (Split-Path $Destination -Parent) -Force | Out-Null
-        Copy-Item -LiteralPath $Source -Destination $Destination -Force -ErrorAction Stop
-    }
-}
-
-function Import-DevBoxDriveRoots {
-    [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$StagingRoot,
-          [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$SnapshotPaths,
-          [Parameter(Mandatory)][string]$DriveRoot,
-          [Parameter(Mandatory)][string]$WorkspaceRoot)
-    $destRoot = [IO.Path]::GetFullPath($DriveRoot).TrimEnd('\')
-    $destWorkspace = [IO.Path]::GetFullPath($WorkspaceRoot).TrimEnd('\')
-    $workspaceTail = $destWorkspace.Substring($destRoot.Length).TrimStart('\')
-    $workspaceManifest = @($SnapshotPaths | Where-Object {
-        [string]$_ -match '^[A-Za-z]:[\\/]' -and
-        ([string]$_).Replace('/','\').EndsWith('\' + $workspaceTail, [StringComparison]::OrdinalIgnoreCase)
-    })
-    if ($workspaceManifest.Count -eq 0) {
-        # Legacy backup had separately backed Projects/Workspace rather than
-        # the whole workspace root; caller must use its legacy importer.
-        return $false
-    }
-    if ($workspaceManifest.Count -ne 1) { throw 'Ambiguous prior managed workspace roots in snapshot.' }
-    $oldWorkspace = ([string]$workspaceManifest[0]).Replace('/','\')
-    $oldBase = $oldWorkspace.Substring(0, $oldWorkspace.Length - $workspaceTail.Length).TrimEnd('\')
-    $oldDrive = $oldBase.Substring(0,1)
-    $allowed = @('a', '_temp', '_work', '_tool', 'hostedtoolcache', 'agent', 'runner',
-        '$RECYCLE.BIN','System Volume Information','Windows','WindowsApps',
-        'Program Files','Program Files (x86)','ProgramData','PerfLogs')
-    $imported = 0
-    foreach ($original in $SnapshotPaths) {
-        $normalized = ([string]$original).Replace('/','\')
-        if (-not $normalized.StartsWith($oldBase + '\', [StringComparison]::OrdinalIgnoreCase)) { continue }
-        $relative = $normalized.Substring($oldBase.Length).TrimStart('\')
-        $segments = @($relative.Split('\'))
-        if (-not $relative -or @($segments | Where-Object { -not $_ -or $_ -in @('.','..') }).Count -gt 0) {
-            throw 'Unsafe old drive path in snapshot manifest.'
-        }
-        if ($segments[0] -in $allowed) {
-            throw 'Unexpected runner or system path in claimed user backup; refusing automatic import.'
-        }
-        # No path can escape the selected new drive root.
-        $destination = [IO.Path]::GetFullPath((Join-Path $destRoot $relative))
-        if (-not $destination.StartsWith($destRoot + '\', [StringComparison]::OrdinalIgnoreCase)) {
-            throw 'Restore destination escaped selected drive root.'
-        }
-        $oldPathTail = $normalized.Substring(3)
-        $stageOne = Join-Path $StagingRoot (Join-Path $oldDrive $oldPathTail)
-        $stageTwo = Join-Path $StagingRoot $oldPathTail
-        $matches = @(@($stageOne, $stageTwo) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -Unique)
-        if ($matches.Count -ne 1) {
-            throw "Expected exactly one staged backup root for $relative; found $($matches.Count)."
-        }
-        Copy-DevBoxStagedEntry -Source $matches[0] -Destination $destination -WorkspaceRoot $destWorkspace
-        $imported++
-        Write-Output "DRIVE DATA RESTORED: $relative"
-    }
-    if ($imported -eq 0) { throw 'Workspace manifest found but nothing imported.' }
-    return $true
-}
-) { $rootFull + '\\' } else { $rootFull }
-    foreach ($entry in @(Get-ChildItem -LiteralPath $scanRoot -Force -ErrorAction Stop)) {
-        if ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) {
-            $skipped += $entry.Name + ' (reparse/link)'
-            continue
-        }
-        if ($excluded -contains $entry.Name) {
-            $skipped += $entry.Name + ' (runner/system)'
-            continue
-        }
-        $roots += $entry.FullName
-    }
-    if ($roots -notcontains $workspaceFull) {
-        throw 'Managed DevBox workspace was missing from the drive coverage set.'
-    }
-    # Workspace backup deliberately excludes these disposable/runtime subtrees.
-    $subtreeExcludes = @('Temp', 'ResticCache', 'Control')
-    $patterns = @()
-    foreach ($part in $subtreeExcludes) {
-        # Match exact folder and descendants under the managed DevBox root.
-        $pattern = $workspaceFull.Replace('\','/') + '/' + $part
-        $patterns += $pattern
-        $patterns += $pattern + '/**'
-    }
-    [pscustomobject]@{
-        Roots = @($roots)
-        ExcludePatterns = @($patterns)
-        Skipped = @($skipped)
-        DriveRoot = $rootFull
-        WorkspaceRoot = $workspaceFull
-    }
-}
-
-function Copy-DevBoxStagedEntry {
-    [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$Source,
-          [Parameter(Mandatory)][string]$Destination,
-          [Parameter(Mandatory)][string]$WorkspaceRoot)
-    if (-not (Test-Path -LiteralPath $Source)) { throw "Saved staged path is missing: $Source" }
-    # Never follow a restored reparse point into a different volume or user dir.
-    $links = @(Get-Item -LiteralPath $Source -Force)
-    if (Test-Path -LiteralPath $Source -PathType Container) {
-        $links += @(Get-ChildItem -LiteralPath $Source -Recurse -Force -ErrorAction Stop |
-            Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint })
-    }
-    if (@($links | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint }).Count -gt 0) {
-        throw 'Saved user-data tree contains a reparse point: refusing unsafe automatic import.'
-    }
-    if (Test-Path -LiteralPath $Source -PathType Container) {
-        New-Item -ItemType Directory -Path $Destination -Force | Out-Null
-        foreach ($child in @(Get-ChildItem -LiteralPath $Source -Force -ErrorAction Stop)) {
-            # Do not import prior-run tools/control/temp over current live runner.
-            if ($Destination.TrimEnd('\') -ieq $WorkspaceRoot.TrimEnd('\') -and
-                $child.Name -in @('Temp', 'ResticCache', 'Control')) { continue }
-            Copy-Item -LiteralPath $child.FullName -Destination (Join-Path $Destination $child.Name) -Recurse -Force -ErrorAction Stop
-        }
-    } else {
-        New-Item -ItemType Directory -Path (Split-Path $Destination -Parent) -Force | Out-Null
-        Copy-Item -LiteralPath $Source -Destination $Destination -Force -ErrorAction Stop
-    }
-}
-
-function Import-DevBoxDriveRoots {
-    [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$StagingRoot,
-          [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$SnapshotPaths,
-          [Parameter(Mandatory)][string]$DriveRoot,
-          [Parameter(Mandatory)][string]$WorkspaceRoot)
-    $destRoot = [IO.Path]::GetFullPath($DriveRoot).TrimEnd('\')
-    $destWorkspace = [IO.Path]::GetFullPath($WorkspaceRoot).TrimEnd('\')
-    $workspaceTail = $destWorkspace.Substring($destRoot.Length).TrimStart('\')
-    $workspaceManifest = @($SnapshotPaths | Where-Object {
-        [string]$_ -match '^[A-Za-z]:[\\/]' -and
-        ([string]$_).Replace('/','\').EndsWith('\' + $workspaceTail, [StringComparison]::OrdinalIgnoreCase)
-    })
-    if ($workspaceManifest.Count -eq 0) {
-        # Legacy backup had separately backed Projects/Workspace rather than
-        # the whole workspace root; caller must use its legacy importer.
-        return $false
-    }
-    if ($workspaceManifest.Count -ne 1) { throw 'Ambiguous prior managed workspace roots in snapshot.' }
-    $oldWorkspace = ([string]$workspaceManifest[0]).Replace('/','\')
-    $oldBase = $oldWorkspace.Substring(0, $oldWorkspace.Length - $workspaceTail.Length).TrimEnd('\')
-    $oldDrive = $oldBase.Substring(0,1)
-    $allowed = @('a', '_temp', '_work', '_tool', 'hostedtoolcache', 'agent', 'runner',
-        '$RECYCLE.BIN','System Volume Information','Windows','WindowsApps',
-        'Program Files','Program Files (x86)','ProgramData','PerfLogs')
-    $imported = 0
-    foreach ($original in $SnapshotPaths) {
-        $normalized = ([string]$original).Replace('/','\')
-        if (-not $normalized.StartsWith($oldBase + '\', [StringComparison]::OrdinalIgnoreCase)) { continue }
-        $relative = $normalized.Substring($oldBase.Length).TrimStart('\')
-        $segments = @($relative.Split('\'))
-        if (-not $relative -or @($segments | Where-Object { -not $_ -or $_ -in @('.','..') }).Count -gt 0) {
-            throw 'Unsafe old drive path in snapshot manifest.'
-        }
-        if ($segments[0] -in $allowed) {
-            throw 'Unexpected runner or system path in claimed user backup; refusing automatic import.'
-        }
-        # No path can escape the selected new drive root.
-        $destination = [IO.Path]::GetFullPath((Join-Path $destRoot $relative))
-        if (-not $destination.StartsWith($destRoot + '\', [StringComparison]::OrdinalIgnoreCase)) {
-            throw 'Restore destination escaped selected drive root.'
-        }
-        $oldPathTail = $normalized.Substring(3)
-        $stageOne = Join-Path $StagingRoot (Join-Path $oldDrive $oldPathTail)
-        $stageTwo = Join-Path $StagingRoot $oldPathTail
-        $matches = @(@($stageOne, $stageTwo) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -Unique)
-        if ($matches.Count -ne 1) {
-            throw "Expected exactly one staged backup root for $relative; found $($matches.Count)."
-        }
-        Copy-DevBoxStagedEntry -Source $matches[0] -Destination $destination -WorkspaceRoot $destWorkspace
-        $imported++
-        Write-Output "DRIVE DATA RESTORED: $relative"
-    }
-    if ($imported -eq 0) { throw 'Workspace manifest found but nothing imported.' }
-    return $true
-}
-) { $DriveRoot = $DriveRoot + '\\' }
-    if (-not (Test-Path -LiteralPath $DriveRoot -PathType Container)) {
-        throw "Selected workspace volume missing: $DriveRoot"
-    }
-    $rootFull = [IO.Path]::GetFullPath($DriveRoot).TrimEnd('\')
-    $workspaceFull = [IO.Path]::GetFullPath($WorkspaceRoot).TrimEnd('\')
-    if (-not $workspaceFull.StartsWith($rootFull + '\', [StringComparison]::OrdinalIgnoreCase)) {
-        throw 'Workspace does not reside beneath the selected drive data root.'
-    }
-    $relativeWorkspace = $workspaceFull.Substring($rootFull.Length).TrimStart('\')
-    if ($relativeWorkspace.Contains('\')) {
-        if ($env:DEVBOX_ISOLATED_TEST -ne '1') {
-            throw 'Production workspace must be directly beneath selected drive root.'
-        }
-    }
-    # Protect the GitHub runner, Windows/volume metadata, and other machine
-    # infrastructure. Treat excluded roots as NOT SAVED, never claim full disk.
-    $excluded = @(
-        'a', '_temp', '_work', '_tool', 'hostedtoolcache', 'agent', 'runner',
-        '$RECYCLE.BIN', 'System Volume Information',
-        'Windows', 'WindowsApps', 'Program Files', 'Program Files (x86)',
-        'ProgramData', 'PerfLogs', 'pagefile.sys', 'swapfile.sys', 'hiberfil.sys'
-    )
-    $roots = @()
-    $skipped = @()
-    foreach ($entry in @(Get-ChildItem -LiteralPath $rootFull -Force -ErrorAction Stop)) {
-        if ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) {
-            $skipped += $entry.Name + ' (reparse/link)'
-            continue
-        }
-        if ($excluded -contains $entry.Name) {
-            $skipped += $entry.Name + ' (runner/system)'
-            continue
-        }
-        $roots += $entry.FullName
-    }
-    if ($roots -notcontains $workspaceFull) {
-        throw 'Managed DevBox workspace was missing from the drive coverage set.'
-    }
-    # Workspace backup deliberately excludes these disposable/runtime subtrees.
-    $subtreeExcludes = @('Temp', 'ResticCache', 'Control')
-    $patterns = @()
-    foreach ($part in $subtreeExcludes) {
-        # Match exact folder and descendants under the managed DevBox root.
-        $pattern = $workspaceFull.Replace('\','/') + '/' + $part
-        $patterns += $pattern
-        $patterns += $pattern + '/**'
-    }
-    [pscustomobject]@{
-        Roots = @($roots)
-        ExcludePatterns = @($patterns)
-        Skipped = @($skipped)
-        DriveRoot = $rootFull
-        WorkspaceRoot = $workspaceFull
-    }
-}
-
-function Copy-DevBoxStagedEntry {
-    [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$Source,
-          [Parameter(Mandatory)][string]$Destination,
-          [Parameter(Mandatory)][string]$WorkspaceRoot)
-    if (-not (Test-Path -LiteralPath $Source)) { throw "Saved staged path is missing: $Source" }
-    # Never follow a restored reparse point into a different volume or user dir.
-    $links = @(Get-Item -LiteralPath $Source -Force)
-    if (Test-Path -LiteralPath $Source -PathType Container) {
-        $links += @(Get-ChildItem -LiteralPath $Source -Recurse -Force -ErrorAction Stop |
-            Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint })
-    }
-    if (@($links | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint }).Count -gt 0) {
-        throw 'Saved user-data tree contains a reparse point: refusing unsafe automatic import.'
-    }
-    if (Test-Path -LiteralPath $Source -PathType Container) {
-        New-Item -ItemType Directory -Path $Destination -Force | Out-Null
-        foreach ($child in @(Get-ChildItem -LiteralPath $Source -Force -ErrorAction Stop)) {
-            # Do not import prior-run tools/control/temp over current live runner.
-            if ($Destination.TrimEnd('\') -ieq $WorkspaceRoot.TrimEnd('\') -and
-                $child.Name -in @('Temp', 'ResticCache', 'Control')) { continue }
-            Copy-Item -LiteralPath $child.FullName -Destination (Join-Path $Destination $child.Name) -Recurse -Force -ErrorAction Stop
-        }
-    } else {
-        New-Item -ItemType Directory -Path (Split-Path $Destination -Parent) -Force | Out-Null
-        Copy-Item -LiteralPath $Source -Destination $Destination -Force -ErrorAction Stop
-    }
-}
-
-function Import-DevBoxDriveRoots {
-    [CmdletBinding()]
-    param([Parameter(Mandatory)][string]$StagingRoot,
-          [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$SnapshotPaths,
-          [Parameter(Mandatory)][string]$DriveRoot,
-          [Parameter(Mandatory)][string]$WorkspaceRoot)
-    $destRoot = [IO.Path]::GetFullPath($DriveRoot).TrimEnd('\')
-    $destWorkspace = [IO.Path]::GetFullPath($WorkspaceRoot).TrimEnd('\')
-    $workspaceTail = $destWorkspace.Substring($destRoot.Length).TrimStart('\')
-    $workspaceManifest = @($SnapshotPaths | Where-Object {
-        [string]$_ -match '^[A-Za-z]:[\\/]' -and
-        ([string]$_).Replace('/','\').EndsWith('\' + $workspaceTail, [StringComparison]::OrdinalIgnoreCase)
-    })
-    if ($workspaceManifest.Count -eq 0) {
-        # Legacy backup had separately backed Projects/Workspace rather than
-        # the whole workspace root; caller must use its legacy importer.
-        return $false
-    }
-    if ($workspaceManifest.Count -ne 1) { throw 'Ambiguous prior managed workspace roots in snapshot.' }
-    $oldWorkspace = ([string]$workspaceManifest[0]).Replace('/','\')
-    $oldBase = $oldWorkspace.Substring(0, $oldWorkspace.Length - $workspaceTail.Length).TrimEnd('\')
-    $oldDrive = $oldBase.Substring(0,1)
-    $allowed = @('a', '_temp', '_work', '_tool', 'hostedtoolcache', 'agent', 'runner',
-        '$RECYCLE.BIN','System Volume Information','Windows','WindowsApps',
-        'Program Files','Program Files (x86)','ProgramData','PerfLogs')
-    $imported = 0
-    foreach ($original in $SnapshotPaths) {
-        $normalized = ([string]$original).Replace('/','\')
-        if (-not $normalized.StartsWith($oldBase + '\', [StringComparison]::OrdinalIgnoreCase)) { continue }
-        $relative = $normalized.Substring($oldBase.Length).TrimStart('\')
-        $segments = @($relative.Split('\'))
-        if (-not $relative -or @($segments | Where-Object { -not $_ -or $_ -in @('.','..') }).Count -gt 0) {
-            throw 'Unsafe old drive path in snapshot manifest.'
-        }
-        if ($segments[0] -in $allowed) {
-            throw 'Unexpected runner or system path in claimed user backup; refusing automatic import.'
-        }
-        # No path can escape the selected new drive root.
-        $destination = [IO.Path]::GetFullPath((Join-Path $destRoot $relative))
-        if (-not $destination.StartsWith($destRoot + '\', [StringComparison]::OrdinalIgnoreCase)) {
-            throw 'Restore destination escaped selected drive root.'
-        }
-        $oldPathTail = $normalized.Substring(3)
-        $stageOne = Join-Path $StagingRoot (Join-Path $oldDrive $oldPathTail)
-        $stageTwo = Join-Path $StagingRoot $oldPathTail
-        $matches = @(@($stageOne, $stageTwo) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -Unique)
-        if ($matches.Count -ne 1) {
-            throw "Expected exactly one staged backup root for $relative; found $($matches.Count)."
-        }
-        Copy-DevBoxStagedEntry -Source $matches[0] -Destination $destination -WorkspaceRoot $destWorkspace
-        $imported++
-        Write-Output "DRIVE DATA RESTORED: $relative"
-    }
-    if ($imported -eq 0) { throw 'Workspace manifest found but nothing imported.' }
+    if ($count -eq 0) { throw 'Saved workspace listed but no drive roots restored.' }
     return $true
 }
