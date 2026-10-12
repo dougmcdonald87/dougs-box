@@ -4,6 +4,7 @@
 Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot 'common.ps1')
 . (Join-Path $PSScriptRoot 'find-staged-work.ps1')
+. (Join-Path $PSScriptRoot 'drive-data.ps1')
 Write-Step 'restore-state'
 
 if ([string]::IsNullOrWhiteSpace($env:RESTIC_PASSWORD)) {
@@ -121,6 +122,19 @@ try {
         Write-DevBox OK "HOT state restored into runner: $target"
     }
 
+    # New snapshots record every user-created drive root. Locate original drive
+    # paths from Restic metadata, not the current runner's drive letter. Legacy
+    # snapshots had only Projects and Workspace and still use the older importer.
+    $restoreDriveRoot = [string]$env:DEVBOX_FAST_ROOT
+    if ([string]::IsNullOrWhiteSpace($restoreDriveRoot)) {
+        if ($env:DEVBOX_ISOLATED_TEST -ne '1') {
+            Stop-DevBox 'Selected workspace drive absent during restore.'
+        }
+        $restoreDriveRoot = Split-Path $env:DEVBOX_WSROOT -Parent
+    }
+    $fullDriveImported = Import-DevBoxDriveRoots -StagingRoot $staging -SnapshotPaths @($latest.paths) -DriveRoot $restoreDriveRoot -WorkspaceRoot $env:DEVBOX_WSROOT
+    if (-not $fullDriveImported) {
+        Write-DevBox WARN 'Legacy selected-folder snapshot. Only paths present in that older snapshot can be recovered.'
     # Restore the DevBox's actual working directories. The backup script
     # includes these roots; otherwise the next ephemeral runner starts empty.
     # Stage first, then copy into the new runner workspace only.
@@ -143,6 +157,9 @@ try {
         }
         Write-DevBox OK "Restored saved DevBox $name into the new ephemeral runner."
     }
+    } else {
+        Write-DevBox OK 'All user-data roots listed in the selected drive snapshot were imported.'
+    }
     # Import only the explicitly staged OpenCode SQLite snapshot after
     # restic finishes and before this runner starts an interactive OpenCode.
     $dbSnapshots = @(Get-ChildItem -LiteralPath $staging -Recurse -File -Filter 'opencode.db' |
@@ -152,11 +169,16 @@ try {
     }
     if ($dbSnapshots.Count -eq 1) {
         $targetDb = Join-Path $env:USERPROFILE '.local\share\opencode\opencode.db'
-        & python (Join-Path $PSScriptRoot 'snapshot-opencode-db.py') $dbSnapshots[0].FullName $targetDb
-        if ($LASTEXITCODE -ne 0) {
-            Stop-DevBox 'OpenCode DB restore/integrity check failed.'
+        $recoveryDir = Join-Path $env:DEVBOX_WSROOT 'PersistentData\OpenCodeRecovery'
+        & python (Join-Path $PSScriptRoot 'restore-opencode-db.py') $dbSnapshots[0].FullName $targetDb $recoveryDir
+        $historyExit = $LASTEXITCODE
+        if ($historyExit -eq 3) {
+            Write-DevBox WARN 'OpenCode session DB could not replace a locked/inaccessible live database. A verified SQLite recovery copy was retained in PersistentData\OpenCodeRecovery. Do not claim conversations loaded; resolve and import after closing OpenCode.'
+        } elseif ($historyExit -ne 0) {
+            Stop-DevBox 'OpenCode DB restore and safe recovery both failed. Original Restic snapshot remains untouched.'
+        } else {
+            Write-DevBox OK 'Restored consistent OpenCode session history SQLite database.'
         }
-        Write-DevBox OK 'Restored consistent OpenCode session history SQLite database.'
     } else {
         Write-DevBox INFO 'No saved OpenCode v2 SQLite history in this snapshot.'
     }

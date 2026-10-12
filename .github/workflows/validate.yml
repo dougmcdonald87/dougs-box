@@ -66,6 +66,10 @@ jobs:
         shell: pwsh
         run: ./tests/cross-drive.tests.ps1
 
+      - name: Adversarial OpenCode locked restore and verified deferred recovery
+        shell: bash
+        run: python3 tests/opencode-restore.tests.py
+
       - name: Adversarial SQLite history snapshot consistency
         shell: bash
         run: python3 tests/opencode-history.tests.py
@@ -170,6 +174,14 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw 'Failed restoring test runner original timezone.' }
           }
 
+      - name: Adversarial user-data volume coverage and cross-drive restore on Windows
+        shell: pwsh
+        run: ./tests/drive-data.tests.ps1
+
+      - name: Real Windows SQLite handle lock and safe OpenCode recovery
+        shell: pwsh
+        run: python tests/opencode-restore.tests.py
+
       - name: Install and inspect both public desktop shortcuts
         shell: pwsh
         run: |
@@ -205,7 +217,8 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $env:DEVBOX_ISOLATED_TEST = '1'
-          $env:DEVBOX_WSROOT = Join-Path $env:RUNNER_TEMP 'DevBox-Storage-QA'
+          $env:DEVBOX_FAST_ROOT = Join-Path $env:RUNNER_TEMP 'DevBox-Isolated-Volume'
+          $env:DEVBOX_WSROOT = Join-Path $env:DEVBOX_FAST_ROOT 'DevBox'
           $env:DEVBOX_CONTROL_PATH = Join-Path $env:DEVBOX_WSROOT 'Control'
           $env:RESTIC_PASSWORD = 'CI-only-dummy-restic-encryption-key'
           $env:GITHUB_RUN_ID = 'ci-isolated-test'
@@ -217,6 +230,9 @@ jobs:
           $workspaceDir = New-Item -ItemType Directory -Path (Join-Path $env:DEVBOX_WSROOT 'Workspace') -Force
           Set-Content -LiteralPath (Join-Path $projectsDir.FullName 'PROJECT-TEST.txt') -Value 'persist me: project' -Encoding ascii
           Set-Content -LiteralPath (Join-Path $workspaceDir.FullName 'WORKSPACE-TEST.txt') -Value 'persist me: workspace' -Encoding ascii
+          $outsideDir = New-Item -ItemType Directory -Path (Join-Path $env:DEVBOX_FAST_ROOT 'My Extra Project') -Force
+          $outsideFile = Join-Path $outsideDir.FullName 'OUTSIDE-DEVBOX-TEST.txt'
+          Set-Content -LiteralPath $outsideFile -Value 'persist me: outside DevBox' -Encoding ascii
           @{ repoUrl = $repo; storageIp = 'test-only-loopback' } | ConvertTo-Json |
             Set-Content -LiteralPath (Join-Path $env:DEVBOX_CONTROL_PATH 'persistence.json') -Encoding utf8
           ./scripts/install-restic.ps1 -ToolsRoot (Split-Path $env:DEVBOX_RESTIC_EXE -Parent)
@@ -232,6 +248,7 @@ jobs:
           }
           Remove-Item -LiteralPath (Join-Path $projectsDir.FullName 'PROJECT-TEST.txt') -Force
           Remove-Item -LiteralPath (Join-Path $workspaceDir.FullName 'WORKSPACE-TEST.txt') -Force
+          Remove-Item -LiteralPath $outsideFile -Force
           Remove-Item -LiteralPath $env:OPENCODE_CI_DB -Force
           Remove-Item -LiteralPath (Join-Path (Split-Path $env:OPENCODE_CI_DB -Parent) 'auth.json') -Force
           ./scripts/restore-state.ps1
@@ -256,6 +273,10 @@ jobs:
           Write-Output 'WINDOWS CROSS-DRIVE STAGING INTEGRATION: PASS'
           if ((Get-Content -LiteralPath (Join-Path $projectsDir.FullName 'PROJECT-TEST.txt') -Raw).Trim() -ne 'persist me: project') { throw 'Project was NOT restored.' }
           if ((Get-Content -LiteralPath (Join-Path $workspaceDir.FullName 'WORKSPACE-TEST.txt') -Raw).Trim() -ne 'persist me: workspace') { throw 'Workspace was NOT restored.' }
+          if ((Get-Content -LiteralPath $outsideFile -Raw).Trim() -ne 'persist me: outside DevBox') {
+            throw 'External user-data root was NOT recovered by a real encrypted Restic snapshot.'
+          }
+          Write-Output 'WINDOWS RESTIC EXTERNAL DRIVE DATA RECOVERY: PASS'
           Write-Output 'WINDOWS RESTIC BACKUP AND REAL WORK RECOVERY: PASS'
           # Strongest cheap integration attack: STOP must invoke the real restic
           # save-state.ps1 against this disposable local encrypted repository.
