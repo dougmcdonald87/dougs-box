@@ -17,8 +17,8 @@ class CountTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / 'source.db'
             db = sqlite3.connect(path)
-            db.execute('CREATE TABLE session (id TEXT, title TEXT)')
-            db.execute("INSERT INTO session VALUES ('1', 'PRIVATE TITLE')")
+            db.execute('CREATE TABLE session_v2 (id TEXT, title TEXT)')
+            db.execute("INSERT INTO session_v2 VALUES ('1', 'PRIVATE TITLE')")
             db.commit()
             db.close()
             content = path.read_bytes()
