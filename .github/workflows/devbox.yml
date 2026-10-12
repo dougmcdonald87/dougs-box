@@ -146,6 +146,21 @@ jobs:
           $secure = ConvertTo-SecureString -String $env:DEVBOX_RDP_PASSWORD -AsPlainText -Force
           ./scripts/configure-rdp.ps1 -Password $secure
 
+      - name: Configure built-in terminal on the Tailscale address
+        id: terminal
+        continue-on-error: true
+        shell: pwsh
+        run: ./scripts/configure-terminal.ps1
+
+      - name: Publish this run's public terminal host key
+        if: ${{ steps.terminal.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: devbox-terminal-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.DEVBOX_CONTROL_PATH }}/Terminal/manifest.json
+          retention-days: 1
+          if-no-files-found: error
+
       - name: Connect persistence (restic over Tailscale)
         shell: pwsh
         env:
@@ -181,6 +196,58 @@ jobs:
           RESTIC_REST_USERNAME: devbox
           RESTIC_REST_PASSWORD: ${{ secrets.DEVBOX_STORAGE_PASSWORD }}
         run: ./scripts/session-manager.ps1 -JobStart
+
+
+  terminal-relay:
+    if: ${{ inputs.operation != 'inspect' }}
+    name: Tailscale browser terminal relay
+    needs: preflight
+    runs-on: ubuntu-latest
+    environment: devbox
+    timeout-minutes: 350
+    steps:
+      - name: Checkout command client
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - name: Verify original OIDC identity
+        shell: pwsh
+        env:
+          TS_OAUTH_CLIENT_ID: ${{ env.DEVBOX_OIDC_CLIENT_ID }}
+          TS_AUDIENCE: ${{ format('api.tailscale.com/{0}', env.DEVBOX_OIDC_CLIENT_ID) }}
+        run: ./scripts/check-tailscale-oidc.ps1
+
+      - name: Join the existing tailnet
+        uses: tailscale/github-action@d1b6cd204f8dceda5b3eaad7f1f767be390056cd # v4.2.0
+        with:
+          oauth-client-id: ${{ env.DEVBOX_OIDC_CLIENT_ID }}
+          audience: ${{ format('api.tailscale.com/{0}', env.DEVBOX_OIDC_CLIENT_ID) }}
+          tags: tag:github-devbox
+          version: latest
+          hostname: devbox-terminal-${{ github.run_id }}
+
+      - name: Prepare root-only Windows command client
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo python3 -m venv /opt/devbox-terminal
+          sudo /opt/devbox-terminal/bin/pip install --disable-pip-version-check paramiko==4.0.0
+          sudo mkdir -p /opt/devbox-terminal/client
+          sudo cp scripts/devbox_terminal.py scripts/terminal-relay.py /opt/devbox-terminal/client/
+          printf '%s\n' '#!/bin/sh' 'exec /opt/devbox-terminal/bin/python /opt/devbox-terminal/client/devbox_terminal.py "$@"' | sudo tee /usr/local/bin/devbox >/dev/null
+          sudo chmod 755 /usr/local/bin/devbox
+
+      - name: Advertise Tailscale SSH
+        shell: bash
+        run: sudo tailscale set --ssh
+
+      - name: Prove harmless Windows command and hold relay for this session
+        shell: bash
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          DEVBOX_RDP_PASSWORD: ${{ secrets.DEVBOX_RDP_PASSWORD }}
+        run: sudo --preserve-env=GITHUB_TOKEN,GITHUB_REPOSITORY,GITHUB_RUN_ID,GITHUB_RUN_ATTEMPT,DEVBOX_RDP_PASSWORD /opt/devbox-terminal/bin/python /opt/devbox-terminal/client/terminal-relay.py
 
 
   audit:
