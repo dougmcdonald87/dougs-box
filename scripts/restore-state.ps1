@@ -4,6 +4,7 @@
 Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot 'common.ps1')
 . (Join-Path $PSScriptRoot 'find-staged-work.ps1')
+. (Join-Path $PSScriptRoot 'drive-data.ps1')
 Write-Step 'restore-state'
 
 if ([string]::IsNullOrWhiteSpace($env:RESTIC_PASSWORD)) {
@@ -121,6 +122,19 @@ try {
         Write-DevBox OK "HOT state restored into runner: $target"
     }
 
+    # New snapshots record every user-created drive root. Locate original drive
+    # paths from Restic metadata, not the current runner's drive letter. Legacy
+    # snapshots had only Projects and Workspace and still use the older importer.
+    $restoreDriveRoot = [string]$env:DEVBOX_FAST_ROOT
+    if ([string]::IsNullOrWhiteSpace($restoreDriveRoot)) {
+        if ($env:DEVBOX_ISOLATED_TEST -ne '1') {
+            Stop-DevBox 'Selected workspace drive absent during restore.'
+        }
+        $restoreDriveRoot = Split-Path $env:DEVBOX_WSROOT -Parent
+    }
+    $fullDriveImported = Import-DevBoxDriveRoots -StagingRoot $staging -SnapshotPaths @($latest.paths) -DriveRoot $restoreDriveRoot -WorkspaceRoot $env:DEVBOX_WSROOT
+    if (-not $fullDriveImported) {
+        Write-DevBox WARN 'Legacy selected-folder snapshot. Only paths present in that older snapshot can be recovered.'
     # Restore the DevBox's actual working directories. The backup script
     # includes these roots; otherwise the next ephemeral runner starts empty.
     # Stage first, then copy into the new runner workspace only.
@@ -142,6 +156,9 @@ try {
             Copy-Item -LiteralPath $child.FullName -Destination (Join-Path $target $child.Name) -Recurse -Force -ErrorAction Stop
         }
         Write-DevBox OK "Restored saved DevBox $name into the new ephemeral runner."
+    }
+    } else {
+        Write-DevBox OK 'All user-data roots listed in the selected drive snapshot were imported.'
     }
     # Import only the explicitly staged OpenCode SQLite snapshot after
     # restic finishes and before this runner starts an interactive OpenCode.
