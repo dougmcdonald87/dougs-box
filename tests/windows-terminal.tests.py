@@ -13,8 +13,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 from devbox_terminal import connect, execute
 
 
-def setup():
-    subprocess.run(['pwsh', '-NoProfile', '-File', 'scripts/configure-terminal.ps1', '-IsolatedTest'], check=True)
+def setup(address='127.0.0.1'):
+    subprocess.run(['pwsh', '-NoProfile', '-File', 'scripts/configure-terminal.ps1', '-IsolatedTest', '-TestListenAddress', address], check=True)
 
 
 password = os.environ['TERMINAL_TEST_PASSWORD']
@@ -47,9 +47,19 @@ except paramiko.BadHostKeyException:
     print('WRONG HOST KEY: rejected before authentication')
 else:
     raise AssertionError('Unpinned host key accepted')
-for attempt in range(2):
+first_manifest = dict(manifest)
+for attempt in range(3):
     if attempt:
-        setup()
+        setup('127.0.0.2')
+        manifest = json.loads((root / 'Terminal' / 'manifest.json').read_text(encoding='utf-8-sig'))
+        assert manifest['address'] == '127.0.0.2'
+        if attempt == 1:
+            try:
+                connect(first_manifest, password)
+            except (OSError, paramiko.ssh_exception.NoValidConnectionsError):
+                print('OLD ADDRESS AFTER LISTENER MOVE: rejected')
+            else:
+                raise AssertionError('Old address remains active after move')
     output = io.StringIO()
     proof = root / 'ssh-command-proof.txt'
     command = f"$ErrorActionPreference='Stop'; [IO.File]::WriteAllText('{str(proof)}','remote-command-{attempt}'); Write-Output 'SSH_COMMAND_EXECUTED_{attempt}'; exit 0"
@@ -58,4 +68,4 @@ for attempt in range(2):
     assert f'SSH_COMMAND_EXECUTED_{attempt}' in output.getvalue()
     assert proof.read_text() == f'remote-command-{attempt}'
     print(f'REAL WINDOWS SSH EXECUTION AFTER SETUP {attempt + 1}: PASS')
-print('WINDOWS TERMINAL REAL SOCKET/AUTH/HOST-KEY/COMMAND/REPEAT ATTACK: SURVIVED')
+print('WINDOWS TERMINAL REAL SOCKET/AUTH/HOST-KEY/ADDRESS-CHANGE/COMMAND/REPEAT ATTACK: SURVIVED')

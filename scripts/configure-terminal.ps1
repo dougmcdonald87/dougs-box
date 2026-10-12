@@ -1,12 +1,13 @@
 # Install a Windows command endpoint on the disposable runner, never a laptop.
-param([switch]$IsolatedTest)
+param([switch]$IsolatedTest, [string]$TestListenAddress = '127.0.0.1')
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 if ($env:GITHUB_ACTIONS -ne 'true') { throw 'Terminal setup is restricted to a disposable Actions runner.' }
 if ($IsolatedTest -and $env:DEVBOX_ISOLATED_TEST -ne '1') { throw 'Loopback setup requires the isolated test flag.' }
-$address = if ($IsolatedTest) { '127.0.0.1' } else { (& tailscale ip -4 | Select-Object -First 1).Trim() }
+$address = if ($IsolatedTest) { $TestListenAddress } else { (& tailscale ip -4 | Select-Object -First 1).Trim() }
 $parsed = $null
 if (-not [Net.IPAddress]::TryParse($address, [ref]$parsed)) { throw 'No valid listener address.' }
+if ($IsolatedTest -and ($parsed.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork -or $parsed.GetAddressBytes()[0] -ne 127)) { throw 'Isolated test listener must be IPv4 loopback.' }
 if (-not $IsolatedTest -and ($parsed.GetAddressBytes()[0] -ne 100 -or $parsed.GetAddressBytes()[1] -lt 64 -or $parsed.GetAddressBytes()[1] -gt 127)) {
     throw 'Terminal listener must use the Tailscale IPv4 address.'
 }
