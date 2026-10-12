@@ -23,7 +23,7 @@ def make_db(path, text):
 
 
 def rows(path):
-    with sqlite3.connect(path) as db:
+    with closing(sqlite3.connect(path)) as db:
         return db.execute("SELECT id FROM sessions").fetchall()
 
 
