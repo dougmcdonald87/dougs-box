@@ -225,7 +225,7 @@ jobs:
           audience: ${{ format('api.tailscale.com/{0}', env.DEVBOX_OIDC_CLIENT_ID) }}
           tags: tag:github-devbox
           version: latest
-          hostname: devbox-terminal-${{ github.run_id }}
+          hostname: codex-relay-${{ github.run_id }}
 
       - name: Prepare root-only Windows command client
         shell: bash

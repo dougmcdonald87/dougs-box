@@ -29,7 +29,7 @@ workflow or by these example files.
 3. Wait for Windows restore and the first verified backup. Only after these
    succeed is the public terminal manifest published. The relay first proves
    a harmless Windows command, then enables Tailscale SSH and reports readiness.
-4. In Tailscale Machines, select `devbox-terminal-<run ID>`, choose SSH, and
+4. In Tailscale Machines, select `codex-relay-<run ID>`, choose SSH, and
    connect as `root`. Follow the required Tailscale reauthentication prompt.
 5. Run `devbox` for a command prompt, or use `devbox 'Get-Service Audiosrv'`.
 
@@ -68,3 +68,5 @@ Official sources:
 - https://tailscale.com/docs/features/tailscale-ssh
 - https://learn.microsoft.com/en-us/windows-server/administration/openssh/openssh_install_firstuse
 - https://docs.paramiko.org/en/4.0/
+
+The Windows desktop remains `devbox-<run ID>` (Windows). Use its own Tailscale address in Windows App. `codex-relay-<run ID>` is a separate Linux machine for browser SSH; its address is not a Windows RDP destination. Each fresh start discovers and pairs the current Windows address automatically.
