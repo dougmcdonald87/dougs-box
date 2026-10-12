@@ -279,7 +279,25 @@ jobs:
           python -c "import os,sqlite3; p=os.environ['OPENCODE_CI_DB']; c=sqlite3.connect(p); c.execute('CREATE TABLE sessions (id TEXT)'); c.execute('INSERT INTO sessions VALUES (?)', ('important-session',)); c.commit(); c.close()"
           Set-Content -LiteralPath (Join-Path (Split-Path $env:OPENCODE_CI_DB -Parent) 'auth.json') -Value 'FAKE-TEST-AUTH-NEVER-BACKUP'
           ./scripts/restore-state.ps1
-          ./scripts/save-state.ps1 -First
+          # Reproduce the real startup failure with an exclusive Windows handle.
+          # The baseline includes the system file and must fail; the fixed save
+          # excludes only that volume-root entry and still backs up user .tmp data.
+          $lockedPath = Join-Path $env:DEVBOX_FAST_ROOT 'DumpStack.log.tmp'
+          $userTempPath = Join-Path $env:DEVBOX_FAST_ROOT 'user-work.tmp'
+          $nestedTempPath = Join-Path $outsideDir.FullName 'DumpStack.log.tmp'
+          Set-Content -LiteralPath $lockedPath -Value 'system dump log'
+          Set-Content -LiteralPath $userTempPath -Value 'persist me: user tmp'
+          Set-Content -LiteralPath $nestedTempPath -Value 'persist me: nested tmp'
+          & $env:DEVBOX_RESTIC_EXE --repo $repo init | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'Could not initialize isolated locked-file test repository.' }
+          $lock = [IO.File]::Open($lockedPath, [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+          try {
+            & $env:DEVBOX_RESTIC_EXE --repo $repo backup $lockedPath $userTempPath 2>$null | Out-Null
+            if ($LASTEXITCODE -ne 3) { throw 'Locked-file baseline did not reproduce Restic exit 3.' }
+            Write-Output 'LOCKED SYSTEM FILE BASELINE: reproduced Restic exit 3.'
+            ./scripts/save-state.ps1 -First
+          } finally { $lock.Dispose() }
+          Write-Output 'LOCKED SYSTEM FILE VERIFIED SAVE: SURVIVED'
           $proofMetadata = Get-Content -LiteralPath (Join-Path $env:DEVBOX_CONTROL_PATH 'last-backup.json') -Raw | ConvertFrom-Json
           if (-not $proofMetadata.snapshotId -or -not $proofMetadata.receiptSnapshotId) {
             throw 'Both verified data and durable receipt snapshots are required.'
@@ -300,9 +318,16 @@ jobs:
           Remove-Item -LiteralPath (Join-Path $projectsDir.FullName 'PROJECT-TEST.txt') -Force
           Remove-Item -LiteralPath (Join-Path $workspaceDir.FullName 'WORKSPACE-TEST.txt') -Force
           Remove-Item -LiteralPath $outsideFile -Force
+          Remove-Item -LiteralPath $userTempPath -Force
+          Remove-Item -LiteralPath $nestedTempPath -Force
           Remove-Item -LiteralPath $env:OPENCODE_CI_DB -Force
           Remove-Item -LiteralPath (Join-Path (Split-Path $env:OPENCODE_CI_DB -Parent) 'auth.json') -Force
           ./scripts/restore-state.ps1
+          if ((Get-Content -LiteralPath $userTempPath -Raw).Trim() -ne 'persist me: user tmp' -or
+              (Get-Content -LiteralPath $nestedTempPath -Raw).Trim() -ne 'persist me: nested tmp') {
+            throw 'Targeted system-file exclusion lost user temporary files.'
+          }
+          Write-Output 'ROOT AND NESTED USER TEMPORARY FILE RECOVERY: PASS'
           if (-not (Test-Path -LiteralPath $env:OPENCODE_CI_DB -PathType Leaf)) { throw 'OpenCode DB NOT restored.' }
           python -c "import os,sqlite3; c=sqlite3.connect(os.environ['OPENCODE_CI_DB']); assert c.execute('SELECT id FROM sessions').fetchall() == [('important-session',)]; c.close()"
           if ($LASTEXITCODE -ne 0) { throw 'OpenCode session row missing or database corrupted.' }
