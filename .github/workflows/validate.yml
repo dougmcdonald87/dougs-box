@@ -73,6 +73,12 @@ jobs:
       - name: Adversarial SQLite history snapshot consistency
         shell: bash
         run: python3 tests/opencode-history.tests.py
+      - name: Refuse empty profile replacing populated history
+        shell: bash
+        run: python3 tests/opencode-empty-regression.tests.py
+      - name: Read-only bounded OpenCode archive row counts
+        shell: bash
+        run: python3 tests/opencode-count-audit.tests.py
 
       - name: Fatal Restic response must not terminate desktop or permit unsafe stop
         shell: pwsh
@@ -416,3 +422,4 @@ jobs:
           . ./scripts/desktop-controls-health.ps1
           if (-not (Test-DevBoxDesktopControls)) { throw 'Startup passed despite missing desktop controls.' }
           Write-Output 'WINDOWS SESSION MANAGER READINESS SMOKE: PASS'
+

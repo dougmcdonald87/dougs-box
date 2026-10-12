@@ -228,5 +228,6 @@ jobs:
           $tools = Join-Path $env:DEVBOX_WSROOT 'Tools\restic'
           ./scripts/install-restic.ps1 -ToolsRoot $tools
           $exe = Join-Path $tools 'restic.exe'
-          python ./scripts/inspect-opencode-snapshots.py --restic-exe $exe --max-prior 30
+          python ./scripts/inspect-opencode-snapshots.py --restic-exe $exe --max-prior 30 --session-counts
           if ($LASTEXITCODE -ne 0) { throw 'Restic metadata inspection failed; no backup-content conclusions.' }
+

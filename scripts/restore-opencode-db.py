@@ -24,7 +24,8 @@ def restore(source: Path, destination: Path, recovery_dir: Path) -> int:
     source, destination, recovery_dir = Path(source), Path(destination), Path(recovery_dir)
     try:
         module.snapshot(source, destination)
-        print("OPENCODE HISTORY RESTORED: SQLite integrity verified")
+        count = module.session_count(destination)
+        print("OPENCODE HISTORY RESTORED: SQLite integrity verified; session rows=" + (str(count) if count is not None else "unknown-schema"))
         return 0
     except PermissionError as error:
         # Windows denied replacement of the live DB, commonly because another
@@ -54,3 +55,4 @@ if __name__ == "__main__":
     except Exception as exc:
         print("OPENCODE HISTORY IMPORT FAILED: " + type(exc).__name__ + ": " + str(exc), file=sys.stderr)
         sys.exit(2)
+
