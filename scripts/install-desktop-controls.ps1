@@ -50,7 +50,7 @@ foreach ($action in @('Save DevBox State Now', 'Finish DevBox Safely')) {
     $path = Join-Path $desktop ($action + '.lnk')
     $link = $shell.CreateShortcut($path)
     if (-not (Test-Path -LiteralPath $link.TargetPath -PathType Leaf) -or
-        -not ($link.Arguments -match 'request-control\\.ps1' -and $link.Arguments -match 'Action (save|stop)') -or
+        -not ($link.Arguments -like '*request-control.ps1*' -and $link.Arguments -match 'Action (save|stop)') -or
         -not (Test-Path -LiteralPath $client -PathType Leaf)) {
         throw "Desktop control link is not actionable: $action"
     }
