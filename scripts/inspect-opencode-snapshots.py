@@ -39,7 +39,7 @@ def session_rows(exe, snapshot_id, lines):
     with tempfile.TemporaryDirectory(prefix='devbox-history-count-') as folder:
         db_path = Path(folder) / 'history.db'
         with db_path.open('wb') as target:
-            proc = subprocess.run([exe, '--repo', REPO, 'dump', str(snapshot_id), str(selected[0]['path'])],
+            proc = subprocess.run([exe, '--repo', REPO, '--no-lock', 'dump', str(snapshot_id), str(selected[0]['path'])],
                                   stdout=target, stderr=subprocess.PIPE, check=False, timeout=180)
         if proc.returncode or db_path.stat().st_size != size:
             return 'dump-failed'
@@ -53,7 +53,7 @@ def parse_time(x):
     return dt.datetime.fromisoformat(str(x).replace("Z", "+00:00"))
 
 def restic(exe, args):
-    proc = subprocess.run([exe, "--repo", REPO, *args], capture_output=True,
+    proc = subprocess.run([exe, "--repo", REPO, "--no-lock", *args], capture_output=True,
                           text=True, check=False, timeout=180)
     if proc.returncode:
         raise RuntimeError("Read-only Restic query failed (exit {})".format(proc.returncode))

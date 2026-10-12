@@ -24,7 +24,7 @@ class CountTests(unittest.TestCase):
             content = path.read_bytes()
             node = {'type': 'file', 'path': '/D/DevBox/PersistentData/OpenCodeHistory/opencode.db', 'size': len(content)}
             def dump(args, **kwargs):
-                self.assertEqual(['dump', 'snapshot', node['path']], args[3:])
+                self.assertEqual(['--no-lock', 'dump', 'snapshot', node['path']], args[3:])
                 kwargs['stdout'].write(content)
                 return SimpleNamespace(returncode=0)
             with patch.object(audit.subprocess, 'run', side_effect=dump):
