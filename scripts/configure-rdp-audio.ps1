@@ -9,7 +9,9 @@ $listener = 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\
 $services = @('AudioEndpointBuilder','Audiosrv')
 if (-not $CheckOnly) {
     foreach ($key in @($policy,$listener)) {
-        New-Item -Path $key -Force | Out-Null
+        if (-not (Test-Path -LiteralPath $key)) {
+            New-Item -Path $key -Force | Out-Null
+        }
         New-ItemProperty -Path $key -Name fDisableCam -PropertyType DWord -Value 0 -Force | Out-Null
     }
     foreach ($name in $services) {

@@ -426,6 +426,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $policy = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\Terminal Services'
           $listener = 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp'
+          New-ItemProperty -Path $listener -Name DevBoxAudioPreservationSentinel -PropertyType String -Value 'keep-existing-listener' -Force | Out-Null
           foreach ($key in @($policy,$listener)) {
             New-ItemProperty -Path $key -Name fDisableCam -PropertyType DWord -Value 1 -Force | Out-Null
           }
@@ -438,6 +439,10 @@ jobs:
           if (-not $rejected) { throw 'Audio health falsely passed disabled services and blocked playback.' }
           Write-Output 'RDP AUDIO DISABLED BASELINE: rejected as expected.'
           ./scripts/configure-rdp-audio.ps1
+          if ((Get-ItemProperty -LiteralPath $listener).DevBoxAudioPreservationSentinel -ne 'keep-existing-listener') {
+            throw 'Audio setup replaced the existing RDP listener registry key.'
+          }
+          Remove-ItemProperty -LiteralPath $listener -Name DevBoxAudioPreservationSentinel
           ./scripts/configure-rdp-audio.ps1 -CheckOnly
           ./scripts/configure-rdp-audio.ps1
           if ((Get-Service TermService).Status -ne 'Running') { throw 'Audio setup stopped the live RDP service.' }
