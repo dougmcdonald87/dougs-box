@@ -5,6 +5,7 @@ param([switch]$First)
 Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot 'common.ps1')
 . (Join-Path $PSScriptRoot 'drive-data.ps1')
+. (Join-Path $PSScriptRoot 'restic-diagnostics.ps1')
 Write-Step 'save-state'
 
 if ([string]::IsNullOrWhiteSpace($env:RESTIC_PASSWORD)) {
@@ -100,7 +101,12 @@ foreach ($pattern in @($coverage.ExcludePatterns)) { $excludes += @('--exclude',
 $lines = @(& $restic --repo $repo --json backup --tag 'devbox-auto' @excludes @roots 2>&1)
 $backupStatus = $LASTEXITCODE
 if ($backupStatus -ne 0) {
-    Stop-DevBox "Restic backup failed (exit $backupStatus). A successful snapshot was not proven."
+    # Never print raw Restic error messages: source names and private paths may
+    # appear in PUBLIC workflow logs. Preserve categories and stable hashes.
+    foreach ($detail in @(Get-DevBoxResticErrorDiagnostics -Lines $lines -ExitCode $backupStatus)) {
+        Write-DevBox WARN $detail
+    }
+    Stop-DevBox "Restic backup failed (exit $backupStatus). No verified snapshot was committed."
 }
 $summary = $null
 foreach ($line in $lines) {
@@ -137,8 +143,36 @@ try {
 } finally {
     Remove-Item -LiteralPath $restoreTarget -Recurse -Force -ErrorAction SilentlyContinue
 }
+# Publish a durable post-verification receipt as a SEPARATE small, encrypted
+# Restic snapshot. A failed/incomplete data snapshot never gets a receipt.
+# This is append-only-friendly: existing snapshots need no tag mutation.
+$receiptDir = New-DevboxDirectorySafe (Join-Path $env:DEVBOX_CONTROL_PATH 'VerifiedReceipts')
+$receiptFile = Join-Path $receiptDir 'DEVBOX-VERIFIED-RECEIPT.json'
+[ordered]@{
+    version = 1
+    snapshotId = $snapshotId
+    canaryHash = $expectedHash
+    utc = [DateTime]::UtcNow.ToString('o')
+} | ConvertTo-Json -Compress | Set-Content -LiteralPath $receiptFile -Encoding utf8
+$receiptLines = @(& $restic --repo $repo --json backup --tag 'devbox-verified-receipt-v1' $receiptFile 2>&1)
+$receiptStatus = $LASTEXITCODE
+if ($receiptStatus -ne 0) {
+    Stop-DevBox "Verified data backup exists but durable receipt creation failed (exit $receiptStatus). No save success is claimed."
+}
+$receiptSummary = $null
+foreach ($line in $receiptLines) {
+    try {
+        $obj = ([string]$line) | ConvertFrom-Json -ErrorAction Stop
+        if ($obj.message_type -eq 'summary') { $receiptSummary = $obj }
+    } catch {}
+}
+if (-not $receiptSummary -or [string]::IsNullOrWhiteSpace([string]$receiptSummary.snapshot_id)) {
+    Stop-DevBox 'Verified data backup exists but its durable receipt snapshot is unproven.'
+}
+$receiptSnapshotId = [string]$receiptSummary.snapshot_id
 [ordered]@{
     snapshotId = $snapshotId
+    receiptSnapshotId = $receiptSnapshotId
     utc = [DateTime]::UtcNow.ToString('o')
     canaryHash = $expectedHash
     rootCount = $roots.Count

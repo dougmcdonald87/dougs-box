@@ -5,6 +5,7 @@ Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot 'common.ps1')
 . (Join-Path $PSScriptRoot 'find-staged-work.ps1')
 . (Join-Path $PSScriptRoot 'drive-data.ps1')
+. (Join-Path $PSScriptRoot 'verified-snapshot.ps1')
 Write-Step 'restore-state'
 
 if ([string]::IsNullOrWhiteSpace($env:RESTIC_PASSWORD)) {
@@ -50,10 +51,17 @@ if ($entries.Count -eq 0) {
     Write-DevBox INFO 'Initialized DevBox repository contains no snapshots; nothing to restore.'
     exit 0
 }
-$latest = $entries | Sort-Object { [DateTime]::Parse([string]$_.time) } -Descending | Select-Object -First 1
+# Do not trust the latest data snapshot: Restic can write a snapshot even
+# when an earlier backup command exits 3 with unreadable source files.
+# Only post-canary receipts, or the exact known-good legacy ID, are eligible.
+try {
+    $latest = Select-DevBoxVerifiedSnapshot -ResticExe $restic -Repo $repo -Snapshots $entries -TempRoot (Join-Path $env:DEVBOX_WSROOT 'Temp')
+} catch {
+    Stop-DevBox "Verified snapshot selection failed: $($_.Exception.Message)"
+}
 $snapshotId = [string]$latest.id
 if ([string]::IsNullOrWhiteSpace($snapshotId)) {
-    Stop-DevBox 'Latest snapshot does not contain an ID.'
+    Stop-DevBox 'Selected verified snapshot does not contain an ID.'
 }
 
 # Check the total snapshot size before hydrating onto an ephemeral runner.

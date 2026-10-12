@@ -78,6 +78,13 @@ jobs:
         shell: pwsh
         run: ./tests/backup-failure-isolation.tests.ps1
 
+      - name: Periodic backup cadence and sanitized restic errors
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          ./tests/backup-cadence.tests.ps1
+          ./tests/restic-diagnostics.tests.ps1
+
       - name: Adversarial user-stop control regression
         shell: pwsh
         run: ./tests/control-queue.tests.ps1
@@ -243,9 +250,23 @@ jobs:
           Set-Content -LiteralPath (Join-Path (Split-Path $env:OPENCODE_CI_DB -Parent) 'auth.json') -Value 'FAKE-TEST-AUTH-NEVER-BACKUP'
           ./scripts/restore-state.ps1
           ./scripts/save-state.ps1 -First
-          if (-not (Test-Path -LiteralPath (Join-Path $env:DEVBOX_CONTROL_PATH 'last-backup.json'))) {
-            throw 'Verified snapshot metadata was not produced.'
+          $proofMetadata = Get-Content -LiteralPath (Join-Path $env:DEVBOX_CONTROL_PATH 'last-backup.json') -Raw | ConvertFrom-Json
+          if (-not $proofMetadata.snapshotId -or -not $proofMetadata.receiptSnapshotId) {
+            throw 'Both verified data and durable receipt snapshots are required.'
           }
+          # FALSIFIER: a newer unverified data snapshot must not override the
+          # previously committed receipt when the next runner restores.
+          $rogueDir = Join-Path $env:RUNNER_TEMP 'Restic-Newest-Unverified-Only'
+          New-Item -ItemType Directory -Path $rogueDir -Force | Out-Null
+          Set-Content -LiteralPath (Join-Path $rogueDir 'ONLY-UNVERIFIED.txt') -Value 'never replace verified DevBox'
+          & $env:DEVBOX_RESTIC_EXE --repo $repo backup --tag devbox-auto $rogueDir | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'Could not construct newer unverified snapshot attack.' }
+          $latestSnapshot = @(& $env:DEVBOX_RESTIC_EXE --repo $repo snapshots --json | ConvertFrom-Json |
+            Sort-Object { [DateTime]::Parse([string]$_.time) } -Descending)[0]
+          if ([string]$latestSnapshot.id -eq [string]$proofMetadata.snapshotId) {
+            throw 'Adversarial newest-unverified snapshot fixture was not established.'
+          }
+          Write-Output 'ATTACK FIXTURE: newer unverified data snapshot exists.'
           Remove-Item -LiteralPath (Join-Path $projectsDir.FullName 'PROJECT-TEST.txt') -Force
           Remove-Item -LiteralPath (Join-Path $workspaceDir.FullName 'WORKSPACE-TEST.txt') -Force
           Remove-Item -LiteralPath $outsideFile -Force
