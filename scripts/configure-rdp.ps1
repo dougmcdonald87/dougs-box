@@ -69,6 +69,8 @@ foreach ($feature in (Get-WindowsFeature | Where-Object { $_.Name -like 'RDS-*' 
 }
 
 # --- services
+try { & (Join-Path $PSScriptRoot 'configure-rdp-audio.ps1') }
+catch { Stop-DevBox "RDP audio host configuration failed: $($_.Exception.Message)" }
 Set-Service -Name TermService -StartupType Automatic -ErrorAction SilentlyContinue
 Start-Service TermService -ErrorAction SilentlyContinue
 
@@ -87,3 +89,4 @@ if (-not $listening) { Stop-DevBox "3389 not listening after RDP enable. Next ac
 Start-Sleep -Seconds 2
 Write-DevBox OK "RDP ready: acct $acct, NLA on, 3389 listening, no RDS roles."
 "rdpAccounts=$acct" | Out-File -FilePath (Join-Path $env:DEVBOX_CONTROL_PATH 'rdp-state.txt') -Encoding utf8
+
