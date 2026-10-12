@@ -4,6 +4,7 @@
 param([switch]$First)
 Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot 'common.ps1')
+. (Join-Path $PSScriptRoot 'drive-data.ps1')
 Write-Step 'save-state'
 
 if ([string]::IsNullOrWhiteSpace($env:RESTIC_PASSWORD)) {
@@ -59,17 +60,26 @@ if (Test-Path -LiteralPath $activeHistory -PathType Leaf) {
     }
 }
 
-# Explicitly include the canary. The original script created it but never
-# added its directory to the backup command.
-# The actual work must be saved. Canary-only snapshots are NOT persistence.
-# Do not back up disposable Tools, Temp, Downloads or Build directories.
-$projectsDir = New-DevboxDirectorySafe (Join-Path $env:DEVBOX_WSROOT 'Projects')
-$workspaceDir = New-DevboxDirectorySafe (Join-Path $env:DEVBOX_WSROOT 'Workspace')
-$roots = @($canaryDir, $projectsDir, $workspaceDir)
-if (Test-Path -LiteralPath $historyFile -PathType Leaf) { $roots += $historyDir }
+# Save ALL user-created top-level paths on the selected workspace drive,
+# including every non-volatile folder under DevBox. Previous code saved only
+# Projects/Workspace/canary/history and silently omitted other D: work.
+$driveRoot = [string]$env:DEVBOX_FAST_ROOT
+if ([string]::IsNullOrWhiteSpace($driveRoot)) {
+    if ($env:DEVBOX_ISOLATED_TEST -ne '1') {
+        Stop-DevBox 'Selected workspace drive is not set. Refusing unscoped backup.'
+    }
+    $driveRoot = Split-Path -Path $env:DEVBOX_WSROOT -Parent
+}
+$coverage = Get-DevBoxDriveRoots -DriveRoot $driveRoot -WorkspaceRoot $env:DEVBOX_WSROOT
+$roots = @($coverage.Roots)
+if ($roots.Count -eq 0) { Stop-DevBox 'No user-data roots located on selected drive.' }
+Write-DevBox INFO "BACKUP COVERAGE: $($roots.Count) selected top-level drive roots; $(@($coverage.Skipped).Count) protected runner/system roots excluded; DevBox Temp/ResticCache/Control excluded."
+# Explicit approved user-profile state lives on C: and remains separate.
+# Credentials and auth.json remain excluded by policy.
 $configFile = Join-Path $PSScriptRoot '..\config\devbox.json'
-$config = if (Test-Path -LiteralPath $configFile) { Get-Content -LiteralPath $configFile -Raw | ConvertFrom-Json } else { $null }
-# Legacy OpenCode may use a project session directory rather than SQLite.
+$config = if (Test-Path -LiteralPath $configFile) {
+    Get-Content -LiteralPath $configFile -Raw | ConvertFrom-Json
+} else { $null }
 $legacyHistory = Join-Path $env:USERPROFILE '.local\share\opencode\project'
 if (Test-Path -LiteralPath $legacyHistory -PathType Container) { $roots += $legacyHistory }
 $hot = if ($config -and $config.hot_paths) { @($config.hot_paths) } else {
@@ -83,11 +93,8 @@ foreach ($p in $hot) {
         $roots += $expanded
     }
 }
-
-$excludes = @()
-if (-not ($config -and $config.persist_opencode_auth)) {
-    $excludes = @('--exclude', 'auth.json', '--exclude', '*.auth*', '--exclude', 'opencode.auth*')
-}
+$excludes = @('--exclude', 'auth.json', '--exclude', '*.auth*', '--exclude', 'opencode.auth*')
+foreach ($pattern in @($coverage.ExcludePatterns)) { $excludes += @('--exclude', $pattern) }
 
 # Restic backup syntax and JSON field names verified against upstream docs.
 $lines = @(& $restic --repo $repo --json backup --tag 'devbox-auto' @excludes @roots 2>&1)
