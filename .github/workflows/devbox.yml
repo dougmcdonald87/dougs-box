@@ -152,15 +152,6 @@ jobs:
         shell: pwsh
         run: ./scripts/configure-terminal.ps1
 
-      - name: Publish this run's public terminal host key
-        if: ${{ steps.terminal.outcome == 'success' }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: devbox-terminal-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ env.DEVBOX_CONTROL_PATH }}/Terminal/manifest.json
-          retention-days: 1
-          if-no-files-found: error
-
       - name: Connect persistence (restic over Tailscale)
         shell: pwsh
         env:
@@ -185,6 +176,15 @@ jobs:
           RESTIC_REST_USERNAME: devbox
           RESTIC_REST_PASSWORD: ${{ secrets.DEVBOX_STORAGE_PASSWORD }}
         run: ./scripts/save-state.ps1 -First
+
+      - name: Publish this run's public terminal host key
+        if: ${{ success() && steps.terminal.outcome == 'success' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: devbox-terminal-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.DEVBOX_CONTROL_PATH }}/Terminal/manifest.json
+          retention-days: 1
+          if-no-files-found: error
 
       # The session manager is the LAST step. It first writes a heartbeat,
       # runs health checks, prints READY, then blocks until the session ends.
@@ -237,10 +237,6 @@ jobs:
           sudo cp scripts/devbox_terminal.py scripts/terminal-relay.py /opt/devbox-terminal/client/
           printf '%s\n' '#!/bin/sh' 'exec /opt/devbox-terminal/bin/python /opt/devbox-terminal/client/devbox_terminal.py "$@"' | sudo tee /usr/local/bin/devbox >/dev/null
           sudo chmod 755 /usr/local/bin/devbox
-
-      - name: Advertise Tailscale SSH
-        shell: bash
-        run: sudo tailscale set --ssh
 
       - name: Prove harmless Windows command and hold relay for this session
         shell: bash

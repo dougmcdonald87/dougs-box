@@ -4,6 +4,7 @@ import ipaddress
 import json
 import os
 from pathlib import Path
+import subprocess
 import time
 import urllib.error
 import urllib.parse
@@ -11,6 +12,18 @@ import urllib.request
 import zipfile
 
 from devbox_terminal import execute
+
+
+def resilient_job_status():
+    """Transient status failures cannot close a healthy Windows connection."""
+    delay = 5
+    while True:
+        try:
+            return windows_job()
+        except (urllib.error.URLError, TimeoutError, OSError, ValueError, KeyError):
+            print('GitHub status temporarily unavailable; keeping relay alive and retrying.', flush=True)
+            time.sleep(delay)
+            delay = min(60, delay * 2)
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -97,15 +110,19 @@ def main():
         result = execute(manifest, password, "Write-Output ('DEVBOX REMOTE COMMAND PASS: ' + $env:COMPUTERNAME); whoami")
         if result != 0:
             raise RuntimeError('Harmless Windows command returned nonzero')
+        # The manifest is published only AFTER restore and first verified backup.
+        # Do not expose browser root access before that acceptance boundary.
+        subprocess.run(['tailscale', 'set', '--ssh'], check=True)
         print('TAILNET WINDOWS COMMAND TEST: SURVIVED. Browser SSH still requires its own acceptance test.', flush=True)
         print('RELAY READY: use the Tailscale SSH console as root, then run devbox.', flush=True)
         while True:
-            job = windows_job()
+            job = resilient_job_status()
             if job and job['status'] == 'completed':
                 print('Windows job ended; relay closing.', flush=True)
                 return
             time.sleep(30)
     finally:
+        subprocess.run(['tailscale', 'set', '--ssh=false'], check=False)
         password_path.unlink(missing_ok=True)
 
 
