@@ -81,10 +81,9 @@ jobs:
       - name: Periodic backup cadence and sanitized restic errors
         shell: pwsh
         run: |
+          $ErrorActionPreference = 'Stop'
           ./tests/backup-cadence.tests.ps1
-          if ($LASTEXITCODE -ne 0) { throw 'Periodic backup regression failed.' }
           ./tests/restic-diagnostics.tests.ps1
-          if ($LASTEXITCODE -ne 0) { throw 'Restic diagnostic regression failed.' }
 
       - name: Adversarial user-stop control regression
         shell: pwsh
