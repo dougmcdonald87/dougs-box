@@ -15,7 +15,7 @@ function Assert-DevBoxRestoreCoverage {
     foreach ($line in $lines) {
         $obj = $null
         try { $obj = ([string]$line) | ConvertFrom-Json -ErrorAction Stop } catch { continue }
-        if ([string]$obj.type -ne 'file') { continue }
+        if ($null -eq $obj.PSObject.Properties['type'] -or [string]$obj.type -ne 'file') { continue }
         $observedNodes++
         $p = ([string]$obj.path).Replace([char]92, '/').ToLowerInvariant()
         foreach ($name in @('Projects','Workspace','PersistentData')) {
