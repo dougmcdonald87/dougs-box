@@ -66,10 +66,6 @@ jobs:
         shell: pwsh
         run: ./tests/cross-drive.tests.ps1
 
-      - name: Adversarial full workspace-drive scope, legacy and cross-drive restore
-        shell: pwsh
-        run: ./tests/drive-data.tests.ps1
-
       - name: Adversarial OpenCode locked restore and verified deferred recovery
         shell: bash
         run: python3 tests/opencode-restore.tests.py
@@ -178,6 +174,10 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw 'Failed restoring test runner original timezone.' }
           }
 
+      - name: Adversarial user-data volume coverage and cross-drive restore on Windows
+        shell: pwsh
+        run: ./tests/drive-data.tests.ps1
+
       - name: Install and inspect both public desktop shortcuts
         shell: pwsh
         run: |
@@ -213,7 +213,8 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $env:DEVBOX_ISOLATED_TEST = '1'
-          $env:DEVBOX_WSROOT = Join-Path $env:RUNNER_TEMP 'DevBox-Storage-QA'
+          $env:DEVBOX_FAST_ROOT = Join-Path $env:RUNNER_TEMP 'DevBox-Isolated-Volume'
+          $env:DEVBOX_WSROOT = Join-Path $env:DEVBOX_FAST_ROOT 'DevBox'
           $env:DEVBOX_CONTROL_PATH = Join-Path $env:DEVBOX_WSROOT 'Control'
           $env:RESTIC_PASSWORD = 'CI-only-dummy-restic-encryption-key'
           $env:GITHUB_RUN_ID = 'ci-isolated-test'
