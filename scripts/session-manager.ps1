@@ -6,6 +6,7 @@ Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot 'common.ps1')
 . (Join-Path $PSScriptRoot 'control-queue.ps1')
 . (Join-Path $PSScriptRoot 'invoke-save-isolated.ps1')
+. (Join-Path $PSScriptRoot 'backup-cadence.ps1')
 
 if (-not $JobStart) {
     Write-Output 'Session manager requires -JobStart.'
@@ -24,6 +25,9 @@ $forceStop = $sessionStart.AddMinutes(([double]$session.jobHardLimitMinutes) - 1
 $backupEvery = [TimeSpan]::FromMinutes([double]$session.backupIntervalMin)
 $heartbeatFile = Join-Path $env:DEVBOX_CONTROL_PATH 'heartbeat.json'
 $lastBackupFile = Join-Path $env:DEVBOX_CONTROL_PATH 'last-backup.json'
+# First canary/backup proof already ran before this manager. Never use a
+# missing, corrupt, or stale receipt file as the scheduling clock.
+$lastPeriodicAttemptUtc = [DateTime]::UtcNow
 
 function Write-Heartbeat {
     $utcNow = [DateTime]::UtcNow
@@ -97,13 +101,10 @@ while ($true) {
         exit 0
     }
 
-    $previous = if (Test-Path -LiteralPath $lastBackupFile) {
-        try {
-            [DateTime]::Parse((Get-Content -LiteralPath $lastBackupFile -Raw | ConvertFrom-Json).utc).ToUniversalTime()
-        } catch { $sessionStart.AddMinutes(-1) }
-    } else { $sessionStart.AddMinutes(-1) }
-
-    if (($now - $previous) -ge $backupEvery) {
+    # A failed save or malformed on-disk receipt must never cause an endless
+    # immediate retry loop. Manual Save/Finish remain processed above.
+    if (Test-DevBoxPeriodicSaveDue -NowUtc $now -LastAttemptUtc $lastPeriodicAttemptUtc -Interval $backupEvery) {
+        $lastPeriodicAttemptUtc = [DateTime]::UtcNow
         $null = Invoke-VerifiedSave -Reason 'Periodic'
     }
 
