@@ -43,7 +43,12 @@ class RecoverTests(unittest.TestCase):
             make_db(dest, "preexisting-live-session")
             # Mimic Windows file handle refusing os.replace (actual last
             # production failure). Only the replacement is fault-injected.
-            with mock.patch.object(helper.module.os, "replace", side_effect=PermissionError("Windows sharing violation")):
+            actual_replace = helper.module.os.replace
+            def lock_only_live_destination(tmp_path, final_path):
+                if pathlib.Path(final_path) == dest:
+                    raise PermissionError("Windows sharing violation")
+                return actual_replace(tmp_path, final_path)
+            with mock.patch.object(helper.module.os, "replace", side_effect=lock_only_live_destination):
                 self.assertEqual(3, helper.restore(source, dest, rescue))
             self.assertEqual([("preexisting-live-session",)], rows(dest))
             rescued = list(rescue.glob("opencode-recovery-*.db"))
