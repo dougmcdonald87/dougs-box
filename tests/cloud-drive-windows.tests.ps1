@@ -23,7 +23,7 @@ $dp=Join-Path $dir 'create.txt'
 $detach=Join-Path $dir 'detach.txt'
 $disk=$null;$partition=$null
 try {
-    @("create vdisk file=`"$file`" maximum=64 type=expandable", "select vdisk file=`"$file`"",'attach vdisk','exit') | Set-Content -LiteralPath $dp
+    @("create vdisk file=`"$file`" maximum=128 type=expandable", "select vdisk file=`"$file`"",'attach vdisk','exit') | Set-Content -LiteralPath $dp
     & diskpart.exe /s $dp
     if ($LASTEXITCODE -ne 0) { throw 'Disposable disk creation failed.' }
     $image=Get-DiskImage -ImagePath $file -ErrorAction Stop
@@ -31,7 +31,7 @@ try {
     if (-not $image.Attached -or $disk.IsBoot -or $disk.IsSystem -or $disk.PartitionStyle -ne 'RAW') { throw 'Fixture identity guard failed.' }
     # These operations exist ONLY in this guarded test, on the exact newly created image.
     $disk | Initialize-Disk -PartitionStyle GPT | Out-Null
-    $partition=New-Partition -DiskNumber $disk.Number -UseMaximumSize
+    $partition=New-Partition -DiskNumber $disk.Number -Size 64MB
     $partition | Format-Volume -FileSystem NTFS -NewFileSystemLabel 'CLOUD_E_CI' -Confirm:$false | Out-Null
     Add-PartitionAccessPath -DiskNumber $disk.Number -PartitionNumber $partition.PartitionNumber -AccessPath 'E:\'
     @{schema_version=1;cloud_volume_id='ci-disposable-volume';provider_kind='cloud-block'} | ConvertTo-Json | Set-Content -LiteralPath 'E:\.devbox-cloud-volume.json'
@@ -42,6 +42,39 @@ try {
         disk_unique_id=[string]$disk.UniqueId;partition_guid=[string]$partition.Guid;volume_unique_id=[string]$volume.UniqueId;
         volume_label='CLOUD_E_CI';cloud_volume_id='ci-disposable-volume';bus_type=[string]$disk.BusType;
         original_read_only=[bool]$disk.IsReadOnly;original_offline=[bool]$disk.IsOffline;set_read_only=$true;bring_online=[bool]$disk.IsOffline}
+    $sibling=New-Partition -DiskNumber $disk.Number -UseMaximumSize
+    $sibling | Format-Volume -FileSystem NTFS -NewFileSystemLabel 'SIBLING_CI' -Confirm:$false | Out-Null
+    $siblingPath=Join-Path $dir 'sibling-mount'
+    New-Item -ItemType Directory -Path $siblingPath | Out-Null
+    $siblingAccess=$siblingPath+'\'
+    Add-PartitionAccessPath -DiskNumber $disk.Number -PartitionNumber $sibling.PartitionNumber -AccessPath $siblingAccess
+    try {
+        Assert-Refused { Mount-DevBoxCloudCandidate -Plan $plan } 'mounted'
+        if ((Get-Disk -Number $disk.Number).IsReadOnly) { throw 'Mounted sibling affected by disk readonly.' }
+    } finally {
+        $p=Storage\Get-Partition -DiskNumber $disk.Number -PartitionNumber $partition.PartitionNumber
+        if ($p.DriveLetter -eq 'E') { Remove-PartitionAccessPath -DiskNumber $disk.Number -PartitionNumber $partition.PartitionNumber -AccessPath 'E:\' }
+        Set-Disk -Number $disk.Number -IsReadOnly $false
+        Remove-PartitionAccessPath -DiskNumber $disk.Number -PartitionNumber $sibling.PartitionNumber -AccessPath $siblingAccess
+    }
+    function global:Get-Partition {
+        [CmdletBinding()]
+        param([char[]]$DriveLetter,[uint32[]]$DiskNumber,[uint32[]]$PartitionNumber)
+        if (-not $PSBoundParameters.ContainsKey('DiskNumber') -and (-not $DriveLetter -or $DriveLetter -contains 'D')) {
+            Write-Error 'Protected inventory unavailable'
+            return
+        }
+        Storage\Get-Partition @PSBoundParameters
+    }
+    try {
+        Assert-Refused { Mount-DevBoxCloudCandidate -Plan $plan } 'inventory unavailable'
+        if ((Get-Disk -Number $disk.Number).IsReadOnly) { throw 'Inventory failure mutated disk.' }
+    } finally {
+        Remove-Item Function:\global:Get-Partition
+        $p=Get-Partition -DiskNumber $disk.Number -PartitionNumber $partition.PartitionNumber
+        if ($p.DriveLetter -eq 'E') { Remove-PartitionAccessPath -DiskNumber $disk.Number -PartitionNumber $partition.PartitionNumber -AccessPath 'E:\' }
+        Set-Disk -Number $disk.Number -IsReadOnly $false
+    }
     $bad=$plan.Clone();$bad.disk_unique_id='wrong'
     Assert-Refused { Mount-DevBoxCloudCandidate -Plan $bad } 'identity'
     if ((Get-Disk -Number $disk.Number).IsReadOnly) { throw 'Wrong identity changed disk flags.' }

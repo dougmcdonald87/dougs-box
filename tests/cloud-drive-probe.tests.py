@@ -43,6 +43,24 @@ class ProbeTests(unittest.TestCase):
             root=Path(t);self.fixture(root)
             with patch('os.fsync',side_effect=OSError('storage unavailable')):
                 with self.assertRaisesRegex(ProbeError,'storage unavailable'):probe(root,'fixture-volume')
+    @unittest.skipIf(os.name=='nt','POSIX rename race; Windows uses native relative handles')
+    def test_root_swap_before_create_never_writes_outside_bound_directory(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as t:
+            base=Path(t);root=base/'root';root.mkdir();self.fixture(root)
+            outside=base/'outside';outside.mkdir();self.fixture(outside)
+            moved=base/'original';real_open=os.open;swapped=False
+            def swap(path,flags,*args,**kwargs):
+                nonlocal swapped
+                if not swapped and '.devbox-cloud-canary-' in str(path):
+                    root.rename(moved);root.symlink_to(outside,target_is_directory=True);swapped=True
+                return real_open(path,flags,*args,**kwargs)
+            with patch('os.open',side_effect=swap):
+                try:probe(root,'fixture-volume')
+                except ProbeError:pass
+            self.assertTrue(swapped)
+            self.assertEqual([p.name for p in outside.iterdir()],['.devbox-cloud-volume.json'])
+
     def test_repeated_probe_uses_distinct_files(self):
         with tempfile.TemporaryDirectory() as t:
             root=Path(t);self.fixture(root)

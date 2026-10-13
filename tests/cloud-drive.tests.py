@@ -89,6 +89,14 @@ class PolicyTests(unittest.TestCase):
         i=copy.deepcopy(INVENTORY);i['candidate_disks'][0]['partitions'][0]['access_paths']=['C:\\mount\\']
         self.rejection(CONFIG,i,'mounted')
 
+    def test_mounted_sibling_partition_blocks_diskwide_readonly(self):
+        i=copy.deepcopy(INVENTORY)
+        sibling=copy.deepcopy(DISK['partitions'][0]);sibling['number']=3
+        sibling['guid']='{33333333-3333-3333-3333-333333333333}'
+        sibling['drive_letter']='F';sibling['access_paths']=['F:\\']
+        i['candidate_disks'][0]['partitions'].append(sibling)
+        self.rejection(CONFIG,i,'mounted')
+
     def test_invalid_or_public_portal_never_accepted(self):
         for portal in ['1.2.3.4','100.1.2.3','100.127.255.256','100.100.1.2:3260','localhost','100.100.1.2\n']:
             c=copy.deepcopy(CONFIG);c['portal']=portal
