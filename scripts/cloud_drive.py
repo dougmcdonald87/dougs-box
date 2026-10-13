@@ -85,7 +85,7 @@ def plan_mount(config, inventory):
     return {'schema_version':1,'status':'validated_read_only_candidate','drive_letter':'E',
             'disk_number':_integer(d.get('number'),'disk number'),
             'partition_number':_integer(p.get('number'),'partition number'),
-            'disk_unique_id':d['unique_id'],'partition_guid':c['partition_guid'],
+            'bus_type':'iSCSI','disk_unique_id':d['unique_id'],'partition_guid':c['partition_guid'],
             'volume_unique_id':c['volume_unique_id'],'volume_label':c['volume_label'],
             'cloud_volume_id':c['cloud_volume_id'],'set_read_only':True,
             'bring_online':d['is_offline'],'original_read_only':d['is_read_only'],
