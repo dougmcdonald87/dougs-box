@@ -25,6 +25,7 @@ $stage = Join-Path $env:RUNNER_TEMP ('opencode-state-' + [guid]::NewGuid().ToStr
 New-Item -ItemType Directory -Path $stage | Out-Null
 New-Item -ItemType Directory -Path $project -Force | Out-Null
 $process = $null
+$headers = @{}
 $old = Get-Location
 function Start-ProbeServer {
     $stdout = Join-Path $env:RUNNER_TEMP "opencode-$Mode.stdout.log"
@@ -39,12 +40,20 @@ function Start-ProbeServer {
             throw 'Owned OpenCode server exited before readiness.'
         }
         try {
-            $response = Invoke-RestMethod -Uri 'http://127.0.0.1:4097/api/session' -TimeoutSec 2
+            # v2 prints a generated credential for this owned loopback server.
+            # Keep it in memory only; never emit it in diagnostics or backups.
+            $passwordLine = @(Get-Content -LiteralPath $stdout -ErrorAction SilentlyContinue | Where-Object { $_ -match '^server password\s+(.+)$' })
+            if ($passwordLine.Count -eq 1) {
+                $password = $passwordLine[0] -replace '^server password\s+', ''
+                $script:headers = @{Authorization='Basic ' + [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes('opencode:' + $password))}
+                $password = $null
+            }
+            $response = Invoke-RestMethod -Uri 'http://127.0.0.1:4097/api/session' -Headers $headers -TimeoutSec 2
             return
         } catch { $lastReadinessError = $_.Exception.Message; Start-Sleep -Milliseconds 500 }
     } while ([DateTime]::UtcNow -lt $deadline)
     Get-Content -LiteralPath $stderr -Tail 15
-    Get-Content -LiteralPath $stdout -Tail 15
+    Get-Content -LiteralPath $stdout -Tail 15 | Where-Object { $_ -notmatch 'server password' }
     Write-Host "LAST LOOPBACK RESPONSE: $lastReadinessError"
     throw 'OpenCode loopback server readiness timed out.'
 }
@@ -55,10 +64,10 @@ try {
         '{"permission":{"bash":"ask"}}' | Set-Content -LiteralPath $config -Encoding utf8
         'Developer project marker that must survive cloud recovery.' | Set-Content -LiteralPath (Join-Path $project 'README.md') -Encoding utf8
         Start-ProbeServer
-        $created = Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:4097/api/session' -ContentType 'application/json' -Body '{"title":"GitHub cloud recovery probe"}' -TimeoutSec 15
+        $created = Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:4097/api/session' -Headers $headers -ContentType 'application/json' -Body '{"title":"GitHub cloud recovery probe"}' -TimeoutSec 15
         $sessionId = [string]$created.data.id
         if ($sessionId -notmatch '^ses_') { throw 'Real app did not return a created session ID.' }
-        $found = Invoke-RestMethod -Uri "http://127.0.0.1:4097/api/session/$sessionId" -TimeoutSec 15
+        $found = Invoke-RestMethod -Uri "http://127.0.0.1:4097/api/session/$sessionId" -Headers $headers -TimeoutSec 15
         if ($found.data.title -cne 'GitHub cloud recovery probe') { throw 'Created session was not readable.' }
         # Existing verified SQLite online-backup helper, while real app is alive.
         & python (Join-Path $PSScriptRoot '..\scripts\snapshot-opencode-db.py') $db (Join-Path $stage 'opencode.db')
@@ -88,7 +97,7 @@ try {
         Copy-Item -LiteralPath (Join-Path $stage 'opencode.json') -Destination $config -Force
         Copy-Item -LiteralPath (Join-Path $stage 'README.md') -Destination (Join-Path $project 'README.md') -Force
         Start-ProbeServer
-        $found = Invoke-RestMethod -Uri "http://127.0.0.1:4097/api/session/$($manifest.session_id)" -TimeoutSec 15
+        $found = Invoke-RestMethod -Uri "http://127.0.0.1:4097/api/session/$($manifest.session_id)" -Headers $headers -TimeoutSec 15
         if ($found.data.title -cne $manifest.title) { throw 'Real OpenCode cannot read recovered session.' }
         $listed = (& $exe session list --format json | Out-String)
         if ($LASTEXITCODE -ne 0 -or $listed -notmatch [regex]::Escape($manifest.session_id)) { throw 'Real CLI cannot list recovered session.' }
