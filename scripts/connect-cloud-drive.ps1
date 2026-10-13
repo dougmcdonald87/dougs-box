@@ -44,10 +44,13 @@ try {
     # No provider account is created and no credentials are inferred here.
     $job=Connect-IscsiTarget -NodeAddress $c.target_iqn -TargetPortalAddress $c.portal -TargetPortalPortNumber 3260 -IsPersistent $false -IsMultipathEnabled $false -AsJob -ErrorAction Stop
     if (-not (Wait-Job -Job $job -Timeout $ConnectTimeoutSeconds)) { throw 'Connection timed out; late completion is UNKNOWN and must be inspected before retry.' }
-    Receive-Job -Job $job -ErrorAction Stop | Out-Null
-    $new=@(Get-IscsiSession -ErrorAction Stop | Where-Object { $_.TargetNodeAddress -eq $c.target_iqn -and [string]$_.SessionIdentifier -notin $beforeIds })
-    if ($new.Count -ne 1) { throw 'Expected exactly one new target session; ambiguous connection is refused.' }
-    $session=$new[0]
+    $result=@(Receive-Job -Job $job -ErrorAction Stop)
+    if ($result.Count -ne 1 -or -not $result[0].SessionIdentifier -or $result[0].TargetNodeAddress -ne $c.target_iqn -or -not $result[0].IsConnected) { throw 'Connection result has no reliable owned session; outcome UNKNOWN, inspect before retry.' }
+    if ([string]$result[0].SessionIdentifier -in $beforeIds) { throw 'Connection result references a preexisting session; refusing ownership.' }
+    $session=$result[0]
+    $owned=@(Get-IscsiSession -ErrorAction Stop | Where-Object { $_.TargetNodeAddress -eq $c.target_iqn -and [string]$_.SessionIdentifier -eq [string]$session.SessionIdentifier })
+    if ($owned.Count -ne 1) { throw 'Owned connection result is absent/ambiguous in fresh inventory; other sessions are never adopted.' }
+    $session=$owned[0]
     $connections=@(Get-IscsiConnection -IscsiSession $session -ErrorAction Stop)
     if ($connections.Count -ne 1 -or [string]$connections[0].TargetNodeAddress -ne $c.portal -or $connections[0].TargetPortNumber -ne 3260) { throw 'Session portal identity mismatch.' }
     $disks=@(Get-Disk -iSCSISession $session -ErrorAction Stop)

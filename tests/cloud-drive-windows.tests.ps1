@@ -91,7 +91,7 @@ try {
     Write-Output 'WINDOWS E READONLY ATTACH, IDENTITY, COLLISION, MARKER AND ROLLBACK: PASS'
     # Only this exact test-owned fixture is made writable for the canary characterization.
     Set-Disk -Number $disk.Number -IsReadOnly $false
-    python (Join-Path $PSScriptRoot '../scripts/probe_cloud_drive.py') --root 'E:\' --cloud-volume-id ci-disposable-volume
+    python (Join-Path $PSScriptRoot '../scripts/probe_cloud_drive.py') --root 'E:\' --cloud-volume-id ci-disposable-volume --volume-unique-id $volume.UniqueId
     if ($LASTEXITCODE -ne 0) { throw 'Fixture canary flush/readback failed.' }
     if ($regressionFailures.Count) { throw ($regressionFailures -join '; ') }
     Write-Output 'WINDOWS DISPOSABLE E DEVICE FLUSH AND LOCAL READBACK: PASS; CLOUD DURABILITY NOT TESTED'

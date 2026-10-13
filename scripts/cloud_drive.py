@@ -72,6 +72,11 @@ def plan_mount(config, inventory):
     if d.get('partition_style')!='GPT':raise CloudDriveError('Requires preformatted GPT; never initializes a disk.')
     parts=d.get('partitions')
     if not isinstance(parts,list):raise CloudDriveError('Missing partition inventory.')
+    for sibling in parts:
+        paths=sibling.get('access_paths')
+        if not isinstance(paths,list):raise CloudDriveError('Missing sibling access-path inventory.')
+        if sibling.get('drive_letter') or any(str(path).lower()!=str(sibling.get('volume_unique_id','')).lower() for path in paths):
+            raise CloudDriveError('Disk has a mounted partition; disk-wide changes refused.')
     matches=[p for p in parts if str(p.get('guid','')).lower()==c['partition_guid'].lower()]
     if len(matches)!=1:raise CloudDriveError('Partition identity must match exactly one partition.')
     p=matches[0]

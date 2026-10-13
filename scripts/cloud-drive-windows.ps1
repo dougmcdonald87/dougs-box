@@ -6,9 +6,14 @@ function Assert-DevBoxCloudDisk {
     $disk=Get-Disk -Number $Plan.disk_number -ErrorAction Stop
     if ([string]$disk.UniqueId -cne [string]$Plan.disk_unique_id) { throw 'Disk identity changed.' }
     if ($disk.IsBoot -or $disk.IsSystem) { throw 'Refusing system disk.' }
+    $allPartitions=@(Get-Partition -ErrorAction Stop)
     foreach ($letter in @('C','D')) {
-        $protected=@(Get-Partition -DriveLetter $letter -ErrorAction SilentlyContinue)
-        if (@($protected | Where-Object { $_.DiskNumber -eq $disk.Number }).Count) { throw 'Refusing protected C:/D: disk.' }
+        $protected=@($allPartitions | Where-Object DriveLetter -EQ $letter)
+        if ($protected.Count -ne 1) { throw 'Protected C:/D: inventory unavailable or ambiguous.' }
+        if ($protected[0].DiskNumber -eq $disk.Number) { throw 'Refusing protected C:/D: disk.' }
+    }
+    foreach ($sibling in @($allPartitions | Where-Object { $_.DiskNumber -eq $disk.Number -and $_.PartitionNumber -ne $Plan.partition_number })) {
+        if ($sibling.DriveLetter -or @($sibling.AccessPaths | Where-Object { $_ -and $_ -notmatch '^\\\\\?\\Volume\{[a-fA-F0-9-]+\}\\$' }).Count) { throw 'Disk has a mounted sibling partition; disk-wide changes refused.' }
     }
     if ([string]$disk.BusType -ne [string]$Plan.bus_type -or $disk.PartitionStyle -ne 'GPT') { throw 'Disk transport/partition identity changed.' }
     $p=Get-Partition -DiskNumber $disk.Number -PartitionNumber $Plan.partition_number -ErrorAction Stop
