@@ -60,6 +60,10 @@ jobs:
           python3 -m pip install --disable-pip-version-check paramiko==4.0.0
           python3 tests/terminal-relay.tests.py
 
+      - name: Lifecycle dispatch and safe-control boundary tests
+        shell: bash
+        run: python3 tests/devbox-lifecycle.tests.py
+
       - name: Verify read-only audit mode cannot start or cancel desktop
         shell: bash
         run: python3 tests/opencode-audit-workflow.tests.py
