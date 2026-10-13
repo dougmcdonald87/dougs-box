@@ -30,3 +30,9 @@ Latest recorded production run38323680245 Windows and relay jobs are completed s
 Current files are complete candidate tools, not a completed cloud disk. No fake local VHD is presented as persistent cloud storage.
 
 Final implementation correction: Windows storage GUIDs are runtime mount-manager paths, not the stable cross-run contract. Stable target, disk, GPT partition, label and provider marker remain pinned; the native GUID is captured fresh and guarded for that invocation. Policy regression changing only the mount-manager GUID failed before this correction and passes afterward.
+
+## Final candidate verification
+
+Code commit24a7c6d10bf94dd8eb5ce206595cd2dace84fee5: candidate CI38364069490 passed both policy and native Windows jobs. Policy16/16 and POSIX probe7/7 passed; Windows probe6 passed with the POSIX-only race case skipped. Actual Windows mount/marker/sibling/protected-inventory/readonly/rollback/flush-readback and controlled session A/B cases passed. Existing validation38364069396 covers six baseline jobs; see GitHub for its final status. Native code is never interpreted as actual cloud acceptance.
+
+The exact uploaded DevBox_Start(2).py was read: it retrieves its GitHub token from iPhone Keychain and contains no inline transferable GitHub token. GitHub connector write access is working; cloud GitHub browser is signed out. No new storage credentials, real target or eligible account were identified. Safe live wiring is authorized once an actual DevBox and target are reachable; no working session was killed or restarted.
