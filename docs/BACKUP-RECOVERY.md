@@ -42,3 +42,12 @@ hash comparison, not by an exit code.
 Snapshot removal is a manual, one-time-owner-only operation on the storage host,
 interactively, after an explicit review of what is in the repository. This
 repository ships no such command; if you see one, audit it.
+# Opt-in cloud E candidate
+
+The normal manual DevBox launch still defaults to `home`. The candidate branch adds `persistence_backend` choices `github-release` and `migrate-to-github`. These use an owned E working-drive alias on the disposable runner; encrypted GitHub checkpoints provide persistence after that runner ends. An occupied E is refused. Existing D and source backups are retained.
+
+First migration: manually run DevBox from the tested candidate branch with operation `start` and persistence backend `migrate-to-github`. The existing source must be reachable once. Its verified snapshot is restored before a cloud repository is initialized or published. An empty/unverified source, an existing published cloud baseline, or failed publication refuses successful migration. Existing source metadata is retained on failure. Save/Finish thereafter require verified cloud receipts.
+
+Subsequent candidate launch: choose `github-release`. Startup must fetch a matching production checkpoint, verify its encrypted data/receipt identities and restore the selected C/workspace/OpenCode state. It does not need the home storage endpoint. A missing/invalid checkpoint refuses empty startup.
+
+Do not change the default, repurpose D or disconnect the existing source until Doug's actual saved data has passed a fresh cloud-only candidate restore. Current tests establish selected-path recovery, not full Windows/all-AppData/arbitrary installed-program compatibility. Transport caps remain 8GiB assembled,512MiB pieces and1MiB manifests; there is no unlimited free-storage guarantee.

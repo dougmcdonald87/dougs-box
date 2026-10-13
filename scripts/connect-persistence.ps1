@@ -4,6 +4,10 @@
 Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot 'common.ps1')
 Write-Step 'connect-persistence'
+if ($env:DEVBOX_PERSISTENCE_BACKEND -ceq 'github-release') {
+    & (Join-Path $PSScriptRoot 'cloud-persistence.ps1') -Mode Connect
+    exit $LASTEXITCODE
+}
 
 # ---- resolve existing, USER-OWNED Lenovo without changing its tag/identity.
 # The storage IP is an explicit input; other devices keep their current Tailscale

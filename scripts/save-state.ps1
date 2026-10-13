@@ -7,6 +7,10 @@ Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot 'drive-data.ps1')
 . (Join-Path $PSScriptRoot 'restic-diagnostics.ps1')
 Write-Step 'save-state'
+if ($env:DEVBOX_PERSISTENCE_BACKEND -ceq 'github-release' -and $env:DEVBOX_CLOUD_INNER_SAVE -ne '1') {
+    & (Join-Path $PSScriptRoot 'cloud-persistence.ps1') -Mode Save -First:$First
+    exit $LASTEXITCODE
+}
 
 if ([string]::IsNullOrWhiteSpace($env:RESTIC_PASSWORD)) {
     Stop-DevBox 'RESTIC_PASSWORD is missing; refuse to create an unverified backup.'
@@ -170,12 +174,23 @@ if (-not $receiptSummary -or [string]::IsNullOrWhiteSpace([string]$receiptSummar
     Stop-DevBox 'Verified data backup exists but its durable receipt snapshot is unproven.'
 }
 $receiptSnapshotId = [string]$receiptSummary.snapshot_id
+$resultReceipt=Join-Path $env:DEVBOX_CONTROL_PATH 'last-backup.json'
+if ($env:DEVBOX_PERSISTENCE_BACKEND -ceq 'github-release') {
+    $pending=$env:DEVBOX_CLOUD_PENDING_RECEIPT
+    $runtime=[IO.Path]::GetFullPath((Join-Path $env:DEVBOX_WSROOT 'Tools\CloudPersistence'))
+    if ($env:DEVBOX_CLOUD_INNER_SAVE -ne '1' -or -not $pending -or
+        [IO.Path]::GetDirectoryName([IO.Path]::GetFullPath($pending)) -ine $runtime -or
+        [IO.Path]::GetFileName($pending) -cnotmatch '^pending-[0-9a-f]{32}\.json$') {
+        Stop-DevBox 'Cloud inner save requires a private transaction receipt.'
+    }
+    $resultReceipt=$pending
+}
 [ordered]@{
     snapshotId = $snapshotId
     receiptSnapshotId = $receiptSnapshotId
     utc = [DateTime]::UtcNow.ToString('o')
     canaryHash = $expectedHash
     rootCount = $roots.Count
-} | ConvertTo-Json -Compress | Set-Content -LiteralPath (Join-Path $env:DEVBOX_CONTROL_PATH 'last-backup.json') -Encoding utf8
+} | ConvertTo-Json -Compress | Set-Content -LiteralPath $resultReceipt -Encoding utf8
 Write-DevBox OK "Verified backup $snapshotId (snapshot listed and canary restored with matching SHA256)."
 exit 0
