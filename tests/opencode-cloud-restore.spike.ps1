@@ -31,6 +31,7 @@ function Start-ProbeServer {
     $stderr = Join-Path $env:RUNNER_TEMP "opencode-$Mode.stderr.log"
     $script:process = Start-Process -FilePath $exe -ArgumentList @('serve','--hostname','127.0.0.1','--port','4097') -WorkingDirectory $project -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru
     $deadline = [DateTime]::UtcNow.AddSeconds(60)
+    $lastReadinessError = 'No HTTP attempt completed.'
     do {
         $script:process.Refresh()
         if ($script:process.HasExited) {
@@ -40,9 +41,11 @@ function Start-ProbeServer {
         try {
             $response = Invoke-RestMethod -Uri 'http://127.0.0.1:4097/api/session' -TimeoutSec 2
             return
-        } catch { Start-Sleep -Milliseconds 500 }
+        } catch { $lastReadinessError = $_.Exception.Message; Start-Sleep -Milliseconds 500 }
     } while ([DateTime]::UtcNow -lt $deadline)
     Get-Content -LiteralPath $stderr -Tail 15
+    Get-Content -LiteralPath $stdout -Tail 15
+    Write-Host "LAST LOOPBACK RESPONSE: $lastReadinessError"
     throw 'OpenCode loopback server readiness timed out.'
 }
 try {
