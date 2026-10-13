@@ -57,6 +57,8 @@ try {
         Set-Disk -Number $disk.Number -IsReadOnly $false
         Remove-PartitionAccessPath -DiskNumber $disk.Number -PartitionNumber $sibling.PartitionNumber -AccessPath $siblingAccess
     }
+    $originalPartitionFunction=(Get-Command Get-Partition -CommandType Function).ScriptBlock
+    Write-Output 'INVENTORY FAILURE GUARD: BEGIN'
     function global:Get-Partition {
         [CmdletBinding()]
         param([char[]]$DriveLetter,[uint32[]]$DiskNumber,[uint32[]]$PartitionNumber)
@@ -70,11 +72,13 @@ try {
         Assert-Refused { Mount-DevBoxCloudCandidate -Plan $plan } 'inventory unavailable'
         if ((Get-Disk -Number $disk.Number).IsReadOnly) { throw 'Inventory failure mutated disk.' }
     } catch { $regressionFailures+=('Protected inventory: '+$_.Exception.Message) } finally {
-        Remove-Item Function:\global:Get-Partition
+        Set-Item Function:\global:Get-Partition -Value $originalPartitionFunction
+        Write-Output 'INVENTORY FAILURE GUARD: RESTORED ORIGINAL NATIVE FUNCTION'
         $p=Get-Partition -DiskNumber $disk.Number -PartitionNumber $partition.PartitionNumber
         if ($p.DriveLetter -eq 'E') { Remove-PartitionAccessPath -DiskNumber $disk.Number -PartitionNumber $partition.PartitionNumber -AccessPath 'E:\' }
         Set-Disk -Number $disk.Number -IsReadOnly $false
     }
+    Write-Output 'INVENTORY FAILURE GUARD: CONTINUING NATIVE FIXTURE'
     $bad=$plan.Clone();$bad.disk_unique_id='wrong'
     Assert-Refused { Mount-DevBoxCloudCandidate -Plan $bad } 'identity'
     if ((Get-Disk -Number $disk.Number).IsReadOnly) { throw 'Wrong identity changed disk flags.' }
