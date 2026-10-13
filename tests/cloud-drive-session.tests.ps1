@@ -4,7 +4,7 @@ if ($env:GITHUB_ACTIONS -ne 'true' -or -not $env:RUNNER_TEMP) { throw 'Disposabl
 if (Get-PSDrive -Name E -ErrorAction SilentlyContinue) { throw 'Requires unoccupied test E; no takeover.' }
 $connector=Join-Path $PSScriptRoot '../scripts/connect-cloud-drive.ps1'
 $cfg=@{schema_version=1;drive_letter='E';portal='100.100.1.2';target_iqn='iqn.2026-10.devbox:cloud-test';disk_unique_id='fixture';
- partition_guid='{11111111-1111-1111-1111-111111111111}';volume_unique_id='\\?\Volume{22222222-2222-2222-2222-222222222222}\';volume_label='FIXTURE';cloud_volume_id='fixture'}
+ partition_guid='{11111111-1111-1111-1111-111111111111}';volume_label='FIXTURE';cloud_volume_id='fixture'}
 $configPath=Join-Path $env:RUNNER_TEMP ('cloud-session-test-'+[guid]::NewGuid().ToString('N')+'.json')
 $cfg | ConvertTo-Json | Set-Content -LiteralPath $configPath
 $global:CloudTestTarget=$cfg.target_iqn

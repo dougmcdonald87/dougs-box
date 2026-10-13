@@ -10,3 +10,5 @@ Fresh reviewer inspected the complete added branch (read-only). No Critical find
 RED evidence: run38362609007 (all independent reproductions executed). Policy sibling refusal failed; POSIX path race wrote outside; native sibling/protected-inventory refusals failed; connection ownership cases failed. Earlier baseline read-only mount/readback passed separately. Fixes must show a fresh full green suite before being accepted.
 
 Reviewer's minor plan-checkbox status will be reconciled when local/native implementation tests pass; actual-cloud deployment gates remain open. Production startup/main and current machine settings remain untouched.
+
+Fresh GREEN for all four review findings: candidate run38363599622 (native Windows, controlled connection ownership, Windows bound-directory probe and policy). The deliberately injected Storage provider function was restored exactly after its test; deleting it had contaminated a later assertion. A subsequent fresh-GUID policy correction is tested separately and documented in the status file; it avoids a manual per-boot GUID edit while retaining stable disk/partition/provider markers.

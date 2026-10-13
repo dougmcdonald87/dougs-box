@@ -20,14 +20,13 @@ except ImportError:
 CONFIG = {'schema_version': 1, 'drive_letter': 'E', 'portal': '100.100.1.2',
           'target_iqn': 'iqn.2026-10.devbox:cloud-test', 'disk_unique_id': 'cloud-disk-001',
           'partition_guid': '{11111111-1111-1111-1111-111111111111}',
-          'volume_unique_id': '\\\\?\\Volume{22222222-2222-2222-2222-222222222222}\\',
           'volume_label': 'DEVBOX_CLOUD_TEST', 'cloud_volume_id': 'cloud-test-001'}
 DISK = {'unique_id': 'cloud-disk-001', 'number': 3, 'bus_type': 'iSCSI',
         'is_boot': False, 'is_system': False, 'is_offline': True, 'is_read_only': False,
         'target_iqn': CONFIG['target_iqn'], 'portal': CONFIG['portal'],
         'partition_style': 'GPT', 'partitions': [
             {'number': 2, 'guid': CONFIG['partition_guid'], 'drive_letter': None,
-             'volume_unique_id': CONFIG['volume_unique_id'], 'filesystem': 'NTFS',
+             'volume_unique_id': '\\\\?\\Volume{22222222-2222-2222-2222-222222222222}\\', 'filesystem': 'NTFS',
              'label': CONFIG['volume_label'], 'access_paths': []}]}
 INVENTORY = {'occupied_letters': ['C', 'D'], 'protected_disk_ids': ['system', 'workspace'],
              'active_sessions': [], 'candidate_disks': [DISK]}
@@ -45,6 +44,15 @@ class PolicyTests(unittest.TestCase):
         self.assertTrue(p['bring_online'])
         self.assertEqual(p['status'], 'validated_read_only_candidate')
 
+    def test_fresh_mount_manager_guid_does_not_require_config_rewrite(self):
+        i=copy.deepcopy(INVENTORY)
+        fresh='\\\\?\\Volume{33333333-3333-3333-3333-333333333333}\\'
+        i['candidate_disks'][0]['partitions'][0]['volume_unique_id']=fresh
+        try:p=plan_mount(CONFIG,i)
+        except CloudDriveError as e:self.fail('Fresh runner identity still requires manual config rewrite: '+str(e))
+        self.assertEqual(p['volume_unique_id'],fresh)
+        self.assertEqual(p['partition_guid'],'{11111111-1111-1111-1111-111111111111}')
+
     def test_any_existing_e_mapping_rejected_before_mount(self):
         i=copy.deepcopy(INVENTORY); i['occupied_letters'].append('E')
         self.rejection(CONFIG, i, 'E:.*occupied')
@@ -60,7 +68,7 @@ class PolicyTests(unittest.TestCase):
 
     def test_wrong_disk_partition_volume_label_target_and_portal_rejected(self):
         for field,value in [('disk_unique_id','wrong'),('partition_guid','{33333333-3333-3333-3333-333333333333}'),
-                           ('volume_unique_id','wrong'),('volume_label','wrong'),
+                           ('volume_label','wrong'),
                            ('target_iqn','iqn.2026-10.other:wrong'),('portal','100.100.1.3')]:
             c=copy.deepcopy(CONFIG);c[field]=value
             self.rejection(c,INVENTORY,'identity|match')

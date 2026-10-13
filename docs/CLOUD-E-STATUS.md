@@ -21,10 +21,12 @@ Latest recorded production run38323680245 Windows and relay jobs are completed s
 1. Access the identified existing cloud provider account and prove free-only resource/quota/transfer entitlement; no paid upgrade or trial-only resources.
 2. Create/select only a new dedicated data volume and private storage endpoint. No replacement Windows desktop. Preserve existing source history.
 3. Export a preformatted disposable test NTFS LUN read-only at the target before Windows connection; prepare its provider-kind/volume marker through controlled provisioning. Do not connect real user data to an unverified writable target.
-4. Re-resolve actual runner/relay and bind expected identities from authenticated native inventory. Windows mount-manager volume GUIDs may change on a fresh runner; this runtime identity must be refreshed, while disk/partition/provider markers remain independently pinned.
+4. Re-resolve actual runner/relay and bind expected identities from authenticated native inventory. The policy derives the current mount-manager volume GUID from the independently pinned disk/GPT partition identity; it is then rechecked during mount and passed to the bound canary. A fresh GUID needs no user config rewrite. Cloud marker verification remains mandatory.
 5. Attach candidate E: read-only and verify source markers. Then separately establish storage-side exclusive ownership and fence stale initiators BEFORE any writable promotion.
 6. Use a disposable cloud dataset for flush/crash/reconnect/full-quota/second-writer testing; record acknowledged transaction boundaries and measured cold/warm app performance.
 7. Test verified portable app settings/history paths on E:, with existing D: and controls unchanged. Demonstrate home-offline operation and independent backup recovery.
 8. Only after acceptance promote writable app use or propose D: cutover. No automated cutover/drive renaming is implemented.
 
 Current files are complete candidate tools, not a completed cloud disk. No fake local VHD is presented as persistent cloud storage.
+
+Final implementation correction: Windows storage GUIDs are runtime mount-manager paths, not the stable cross-run contract. Stable target, disk, GPT partition, label and provider marker remain pinned; the native GUID is captured fresh and guarded for that invocation. Policy regression changing only the mount-manager GUID failed before this correction and passes afterward.

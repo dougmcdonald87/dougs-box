@@ -14,7 +14,7 @@ class CloudDriveError(ValueError):
     pass
 
 FIELDS = {'schema_version','drive_letter','portal','target_iqn','disk_unique_id',
-          'partition_guid','volume_unique_id','volume_label','cloud_volume_id'}
+          'partition_guid','volume_label','cloud_volume_id'}
 
 def validate_config(config):
     if not isinstance(config,dict) or set(config) != FIELDS:
@@ -39,8 +39,6 @@ def validate_config(config):
         raise CloudDriveError('Invalid target IQN identity.')
     if not re.fullmatch(r'\{[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\}',config['partition_guid']):
         raise CloudDriveError('Invalid partition GUID identity.')
-    if not re.fullmatch(r'\\\\\?\\Volume\{[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\}\\',config['volume_unique_id']):
-        raise CloudDriveError('Invalid volume unique identity.')
     return dict(config)
 
 def _integer(value,name):
@@ -81,17 +79,19 @@ def plan_mount(config, inventory):
     if len(matches)!=1:raise CloudDriveError('Partition identity must match exactly one partition.')
     p=matches[0]
     if p.get('filesystem')!='NTFS':raise CloudDriveError('Requires existing NTFS; never formats a disk.')
-    if str(p.get('volume_unique_id','')).lower()!=c['volume_unique_id'].lower() or p.get('label')!=c['volume_label']:
-        raise CloudDriveError('Volume identity/label mismatch.')
+    volume_id=p.get('volume_unique_id')
+    if not isinstance(volume_id,str) or not re.fullmatch(r'\\\\\?\\Volume\{[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}\}\\',volume_id):
+        raise CloudDriveError('Runtime volume identity unavailable or malformed.')
+    if p.get('label')!=c['volume_label']:raise CloudDriveError('Volume label identity mismatch.')
     paths=p.get('access_paths')
     if not isinstance(paths,list):raise CloudDriveError('Missing access-path inventory.')
-    if p.get('drive_letter') or any(str(path).lower()!=c['volume_unique_id'].lower() for path in paths):
+    if p.get('drive_letter') or any(str(path).lower()!=volume_id.lower() for path in paths):
         raise CloudDriveError('Candidate partition already mounted; no takeover allowed.')
     return {'schema_version':1,'status':'validated_read_only_candidate','drive_letter':'E',
             'disk_number':_integer(d.get('number'),'disk number'),
             'partition_number':_integer(p.get('number'),'partition number'),
             'bus_type':'iSCSI','disk_unique_id':d['unique_id'],'partition_guid':c['partition_guid'],
-            'volume_unique_id':c['volume_unique_id'],'volume_label':c['volume_label'],
+            'volume_unique_id':volume_id,'volume_label':c['volume_label'],
             'cloud_volume_id':c['cloud_volume_id'],'set_read_only':True,
             'bring_online':d['is_offline'],'original_read_only':d['is_read_only'],
             'original_offline':d['is_offline']}
