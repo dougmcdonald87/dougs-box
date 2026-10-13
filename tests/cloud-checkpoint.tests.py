@@ -1,4 +1,5 @@
 import hashlib,importlib.util,json,pathlib,tempfile,unittest,zipfile
+from unittest.mock import patch
 
 path=pathlib.Path(__file__).resolve().parents[1]/'scripts/cloud_checkpoint.py'
 module=None
@@ -8,6 +9,7 @@ if path.exists():
 
 class Remote:
     repository='dougmcdonald87/dougs-box'
+    channel='ci-1-1'
     def __init__(self):self.records={};self.fail=None;self.corrupt=False
     def create_draft(self,tag):self.records[tag]={'draft':True,'assets':{}}
     def upload(self,tag,file):
@@ -78,5 +80,21 @@ class CheckpointTests(unittest.TestCase):
     def test_duplicate_zip_entries_refused(self):
         with zipfile.ZipFile(self.archive,'a') as z:z.writestr('CONFIG',b'duplicate')
         with self.assertRaises(module.CheckpointError):self.publish()
+    def test_ci_generations_cannot_be_restored_as_production(self):
+        self.publish();self.remote.channel='production'
+        with self.assertRaises(module.CheckpointError):module.fetch_latest(self.remote,self.root/'out.zip')
+    def test_archive_change_after_hash_refused_before_cloud_mutation(self):
+        real_digest=module.digest;changed=False
+        def race(path):
+            nonlocal changed
+            value=real_digest(path)
+            if pathlib.Path(path)==self.archive and not changed:
+                changed=True
+                with zipfile.ZipFile(self.archive,'w') as z:
+                    z.writestr('config',b'ENCRYPTED-config');z.writestr('keys/'+'a'*64,b'wrapped-key');z.writestr('data/ab/'+'b'*64,b'encrypted-pack')
+            return value
+        with patch.object(module,'digest',side_effect=race):
+            with self.assertRaises(module.CheckpointError):self.publish()
+        self.assertEqual(self.remote.records,{})
 
 if __name__=='__main__':unittest.main()

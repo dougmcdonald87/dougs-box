@@ -16,6 +16,9 @@ if ($Mode -eq 'Capture') {
     New-Item -ItemType Directory -Path (Split-Path $fixture -Parent) -Force | Out-Null
     'cloud C configuration fixture' | Set-Content -LiteralPath $fixture -Encoding utf8
     'cloud workspace fixture' | Set-Content -LiteralPath (Join-Path $env:DEVBOX_WSROOT 'Projects\work.txt') -Encoding utf8
+    & (Join-Path $PSScriptRoot '..\scripts\connect-persistence.ps1')
+    if ($LASTEXITCODE -eq 0) { throw 'Missing cloud generation silently accepted as empty startup.' }
+    Write-Host 'MISSING CLOUD ATTACK PASS: blank startup refused before initialization.'
     & $adapter -Mode Initialize
     if ($LASTEXITCODE -ne 0) { throw 'Explicit new checkpoint repository failed.' }
     & (Join-Path $PSScriptRoot '..\scripts\save-state.ps1') -First
@@ -44,12 +47,20 @@ if ($Mode -eq 'Capture') {
     if ($result.success -ne $false) { throw 'False successful cloud save.' }
     if ([Convert]::ToBase64String([IO.File]::ReadAllBytes($receipt)) -cne [Convert]::ToBase64String($before)) { throw 'Failed save destroyed prior verified receipt.' }
     Write-Host 'CLOUD FINISH ATTACK PASS: failed cloud publication preserved receipt and refused stop.'
+    $nonce=[guid]::NewGuid().ToString('N')
+    'stop' | Set-Content -LiteralPath (Join-Path $commands "stop-$nonce.request")
+    $stop=Invoke-DevBoxControlRequests -ControlPath $env:DEVBOX_CONTROL_PATH -VerifiedSave {
+        Invoke-DevBoxBackupIsolated -SaveScript (Join-Path $PSScriptRoot '..\scripts\save-state.ps1')
+    }
+    if (-not $stop) { throw 'Verified cloud save did not satisfy existing Finish contract.' }
+    $record=Get-Content -LiteralPath $receipt -Raw | ConvertFrom-Json
+    Write-Host 'VERIFIED CLOUD FINISH PASS: existing queue authorizes Finish only after cloud readback receipt.'
     $record.cloudGeneration | Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'cloud-generation.txt') -Encoding ascii
     "generation=$($record.cloudGeneration)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 } else {
     if (Test-Path -LiteralPath $fixture) { throw 'Fresh runner unexpectedly has source C fixture.' }
     # Neither step contacts a home endpoint. Source repo must be an accepted generation.
-    & $adapter -Mode Connect
+    & (Join-Path $PSScriptRoot '..\scripts\connect-persistence.ps1')
     if ($LASTEXITCODE -ne 0) { throw 'Cloud-only connection failed.' }
     & (Join-Path $PSScriptRoot '..\scripts\restore-state.ps1')
     if ($LASTEXITCODE -ne 0) { throw 'Existing automatic restore failed on cloud repo.' }

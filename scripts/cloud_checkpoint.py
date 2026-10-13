@@ -21,7 +21,7 @@ MAX_BYTES = 8 * 1024**3
 PART_BYTES = 512 * 1024**2
 MANIFEST_BYTES = 1024**2
 PREFIX = 'devbox-checkpoint-v1-'
-TAG = re.compile(r'devbox-checkpoint-v1-\d{8}T\d{6}Z-[0-9a-f]{32}')
+TAG = re.compile(r'devbox-checkpoint-v1-(production|ci-\d+-\d+)-\d{8}T\d{6}Z-[0-9a-f]{32}')
 HEX = re.compile(r'[0-9a-f]{64}')
 
 
@@ -63,10 +63,10 @@ def archive_check(path, max_bytes=MAX_BYTES):
 
 
 def validate_manifest(value, remote, tag, max_bytes):
-    fields = {'schema','repository','generation','snapshot_id','receipt_snapshot_id','bytes','sha256','parts'}
+    fields = {'schema','repository','channel','generation','snapshot_id','receipt_snapshot_id','bytes','sha256','parts'}
     if not isinstance(value, dict) or set(value) != fields or value['schema'] != 1:
         raise CheckpointError('Invalid checkpoint schema')
-    if value['repository'] != remote.repository or value['generation'] != tag or not TAG.fullmatch(tag):
+    if value['repository'] != remote.repository or value['channel'] != remote.channel or value['generation'] != tag or not TAG.fullmatch(tag) or TAG.fullmatch(tag).group(1) != remote.channel:
         raise CheckpointError('Checkpoint identity mismatch')
     for field in ('snapshot_id','receipt_snapshot_id','sha256'):
         if not isinstance(value[field], str) or not HEX.fullmatch(value[field]):
@@ -97,12 +97,13 @@ def publish(archive, snapshot_id, receipt_id, remote, max_bytes=MAX_BYTES, part_
         archive_check(archive,max_bytes)
         if not HEX.fullmatch(snapshot_id) or not HEX.fullmatch(receipt_id):
             raise CheckpointError('Verified snapshot IDs required')
-        generation = PREFIX + datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ-') + uuid.uuid4().hex
-        manifest = {'schema':1,'repository':remote.repository,'generation':generation,
+        generation = PREFIX + remote.channel + '-' + datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ-') + uuid.uuid4().hex
+        manifest = {'schema':1,'repository':remote.repository,'channel':remote.channel,'generation':generation,
                     'snapshot_id':snapshot_id,'receipt_snapshot_id':receipt_id,
                     'bytes':Path(archive).stat().st_size,'sha256':digest(archive),'parts':[]}
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
+            packed_hash = hashlib.sha256()
             with open(archive,'rb') as stream:
                 number = 0
                 while stream.tell() < manifest['bytes']:
@@ -112,9 +113,11 @@ def publish(archive, snapshot_id, receipt_id, remote, max_bytes=MAX_BYTES, part_
                         while remaining:
                             block = stream.read(min(1024**2,remaining))
                             if not block:raise CheckpointError('Archive changed during packing')
-                            output.write(block);remaining -= len(block)
+                            output.write(block);packed_hash.update(block);remaining -= len(block)
                     manifest['parts'].append({'name':piece.name,'bytes':piece.stat().st_size,'sha256':digest(piece)})
                     number += 1
+            if packed_hash.hexdigest() != manifest['sha256']:
+                raise CheckpointError('Archive changed after verification')
             validate_manifest(manifest,remote,generation,max_bytes)
             # Every mutation is confined to a fresh draft generation.
             remote.create_draft(generation)
@@ -174,11 +177,17 @@ def fetch_latest(remote, destination, max_bytes=MAX_BYTES, verify=None):
 
 
 class GitHubRemote:
-    def __init__(self,repository):
+    def __init__(self,repository,channel):
         if not re.fullmatch(r'[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+',repository) or repository != os.environ.get('GITHUB_REPOSITORY'):
             raise CheckpointError('GitHub repository identity mismatch')
         if not os.environ.get('GH_TOKEN'):raise CheckpointError('GitHub job credential unavailable')
         self.repository=repository
+        if channel == 'production':
+            if os.environ.get('DEVBOX_ISOLATED_TEST') == '1':raise CheckpointError('CI fixtures cannot use production checkpoint channel')
+        elif channel != 'ci-' + os.environ.get('GITHUB_RUN_ID','') + '-' + os.environ.get('GITHUB_RUN_ATTEMPT',''):
+            raise CheckpointError('CI checkpoint channel identity mismatch')
+        if not re.fullmatch(r'production|ci-\d+-\d+',channel):raise CheckpointError('Invalid checkpoint channel')
+        self.channel=channel
     def call(self,*args):
         result=subprocess.run(['gh',*args,'--repo',self.repository],capture_output=True,text=True,timeout=300)
         if result.returncode:raise CheckpointError('GitHub transport operation failed')
@@ -200,7 +209,7 @@ class GitHubRemote:
             raise CheckpointError('Cloud publication not acknowledged')
     def generations(self):
         rows=json.loads(self.call('release','list','--limit','100','--json','tagName,isDraft'))
-        return [row['tagName'] for row in rows if not row['isDraft'] and TAG.fullmatch(row['tagName'])]
+        return [row['tagName'] for row in rows if not row['isDraft'] and TAG.fullmatch(row['tagName']) and TAG.fullmatch(row['tagName']).group(1) == self.channel]
 
 
 def crypto_verify(archive,restic):
@@ -216,12 +225,13 @@ if __name__=='__main__':
     parser=argparse.ArgumentParser()
     parser.add_argument('operation',choices=['publish','fetch'])
     parser.add_argument('--repository',required=True)
+    parser.add_argument('--channel',required=True)
     parser.add_argument('--archive',required=True)
     parser.add_argument('--restic-exe',required=True)
     parser.add_argument('--snapshot-id');parser.add_argument('--receipt-id')
     args=parser.parse_args()
     try:
-        remote=GitHubRemote(args.repository)
+        remote=GitHubRemote(args.repository,args.channel)
         if args.operation=='publish':
             if not crypto_verify(args.archive,args.restic_exe):raise CheckpointError('Encrypted repository verification failed; no upload')
             record=publish(args.archive,args.snapshot_id or '',args.receipt_id or '',remote)
