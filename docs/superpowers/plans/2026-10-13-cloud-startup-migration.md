@@ -31,9 +31,9 @@ Interfaces: candidate script consumes qualifying physical root, produces E alias
 - [ ] Commit/checkpoint evidence and limitations.
 
 ### Task 2: manual workflow selection
-Files: .github/workflows/devbox.yml, candidate validation workflow and docs/BACKUP-RECOVERY.md.
+Files: .github/workflows/devbox.yml, candidate validation workflow, scripts/devbox_lifecycle.py, tests/devbox-lifecycle.tests.py and docs/BACKUP-RECOVERY.md.
 Interfaces: workflow input persistence_backend choices home/github-release/migrate-to-github, default home. Selected cloud path bootstraps E; migration restores home once then sets cloud env for later steps. GH_TOKEN reaches cloud connect/first save/session-manager; Windows job contents write only, other jobs unchanged.
 - [ ] Add executable YAML contract tests for selected step conditions/env/permissions and refusal of auto dispatch; observe RED.
 - [ ] Wire explicit choices into existing flow and pass contract/native migration tests.
 - [ ] Run baseline Validate and final independent review; one important-finding fix pass, then checkpoint.
-- [ ] Prepare the concrete manual candidate migration run; use existing access if available. No default switch, main merge or Lenovo disconnect before production restore acceptance.
+- [ ] Prepare the explicit backend request on main after reviewed opt-in integration, preserving the existing main-only Tailscale trust; keep normal lifecycle payload unchanged. No default switch or Lenovo disconnect before actual production restore acceptance. Main integration is a separate controlled action, not inferred from fixture success.

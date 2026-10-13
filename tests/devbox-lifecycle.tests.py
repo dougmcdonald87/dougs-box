@@ -15,6 +15,14 @@ spec.loader.exec_module(m)
 
 
 class LifecycleTests(unittest.TestCase):
+    def test_cloud_backend_cli_emits_explicit_manual_main_payload(self):
+        for backend in ('github-release','migrate-to-github'):
+            with self.subTest(backend=backend), patch.dict(os.environ, {'GH_TOKEN':'test-only'}, clear=True), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()), patch.object(m,'request',side_effect=[(200,{'total_count':0,'workflow_runs':[]}),(200,{'workflow_run_id':99})]) as api:
+                try: status=m.main(['start','--backend',backend])
+                except SystemExit as exc: status=exc.code
+                self.assertEqual(status,0,'explicit manual cloud selection unavailable')
+                self.assertEqual(api.call_args.args[2],{'ref':'main','inputs':{'operation':'start','persistence_backend':backend}})
+
     def test_active_run_blocks_dispatch(self):
         with patch.object(m, 'request', return_value=(200, {'total_count': 1, 'workflow_runs': [{'id': 17, 'status': 'waiting'}]})) as api:
             with self.assertRaises(m.DevBoxError): m.start('test-only')
