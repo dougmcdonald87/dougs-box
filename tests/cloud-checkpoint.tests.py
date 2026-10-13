@@ -15,8 +15,9 @@ class Remote:
     def upload(self,tag,file):
         if self.fail=='upload':raise RuntimeError('interrupted transfer')
         self.records[tag]['assets'][file.name]=file.read_bytes()
-    def download(self,tag,name,destination):
+    def download(self,tag,name,destination,max_bytes=None):
         content=self.records[tag]['assets'][name]
+        if max_bytes is not None and len(content)>max_bytes:raise RuntimeError('asset exceeds bound')
         if self.corrupt and name.endswith('.bin'):content=b'corrupt'
         destination.write_bytes(content)
     def finish(self,tag):
@@ -75,7 +76,7 @@ class CheckpointTests(unittest.TestCase):
         with self.assertRaises(module.CheckpointError):module.fetch_latest(self.remote,self.root/'out.zip')
     def test_caller_crypto_verification_must_pass_before_destination_changes(self):
         self.publish();p=self.root/'out.zip';p.write_bytes(b'old')
-        with self.assertRaises(module.CheckpointError):module.fetch_latest(self.remote,p,verify=lambda _:False)
+        with self.assertRaises(module.CheckpointError):module.fetch_latest(self.remote,p,verify=lambda *_:False)
         self.assertEqual(p.read_bytes(),b'old')
     def test_duplicate_zip_entries_refused(self):
         with zipfile.ZipFile(self.archive,'a') as z:z.writestr('CONFIG',b'duplicate')
@@ -96,5 +97,28 @@ class CheckpointTests(unittest.TestCase):
         with patch.object(module,'digest',side_effect=race):
             with self.assertRaises(module.CheckpointError):self.publish()
         self.assertEqual(self.remote.records,{})
+
+    def test_manifest_identity_is_passed_to_crypto_verifier_before_acceptance(self):
+        old=self.publish();new=self.publish()
+        assets=self.remote.records[new['generation']]['assets']
+        value=json.loads(assets['checkpoint.json']);value['snapshot_id']='c'*64
+        assets['checkpoint.json']=json.dumps(value).encode()
+        def verify(archive,record):return record['snapshot_id']=='a'*64 and record['receipt_snapshot_id']=='b'*64
+        self.assertEqual(module.fetch_latest(self.remote,self.root/'out.zip',verify=verify)['generation'],old['generation'])
+
+    def test_generation_discovery_pages_past_unrelated_releases(self):
+        tag='devbox-checkpoint-v1-production-20261013T120000Z-'+'a'*32
+        remote=object.__new__(module.GitHubRemote);remote.repository='owner/repo';remote.channel='production'
+        pages=[[{'tag_name':'unrelated','draft':False}]*100,[{'tag_name':tag,'draft':False}],[]]
+        with patch.object(remote,'api',side_effect=lambda endpoint:pages[int(endpoint.rsplit('page=',1)[1])-1],create=True):
+            with patch.object(remote,'call',return_value=json.dumps([{'tagName':'unrelated','isDraft':False}]*100)):
+                self.assertEqual(remote.generations(),[tag])
+
+    def test_remote_downloads_receive_strict_byte_limits(self):
+        self.publish();original=self.remote.download;limits=[]
+        def bounded(tag,name,destination,max_bytes=None):
+            limits.append(max_bytes);return original(tag,name,destination,max_bytes)
+        with patch.object(self.remote,'download',side_effect=bounded):module.fetch_latest(self.remote,self.root/'out.zip')
+        self.assertTrue(all(type(limit)is int and limit>0 for limit in limits))
 
 if __name__=='__main__':unittest.main()

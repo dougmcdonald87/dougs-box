@@ -21,6 +21,37 @@ if ($Mode -eq 'Capture') {
     Write-Host 'MISSING CLOUD ATTACK PASS: blank startup refused before initialization.'
     & $adapter -Mode Initialize
     if ($LASTEXITCODE -ne 0) { throw 'Explicit new checkpoint repository failed.' }
+    . (Join-Path $PSScriptRoot '..\scripts\common.ps1')
+    . (Join-Path $PSScriptRoot '..\scripts\control-queue.ps1')
+    $failures=@()
+    if (Test-DevBoxRepoDestination -Repo 'rest:http://100.70.202.110:8000/devbox/') { $failures+='Cloud selected guard accepted home.' }
+    if (Test-DevBoxRepoDestination -Repo (Join-Path $base 'unrelated-repository')) { $failures+='Cloud selected guard accepted unrelated cache.' }
+    $receipt=Join-Path $env:DEVBOX_CONTROL_PATH 'last-backup.json'
+    $sentinel='{"snapshotId":"previous-committed","utc":"previous"}'
+    [IO.File]::WriteAllText($receipt,$sentinel)
+    $env:DEVBOX_CLOUD_INNER_SAVE='1'
+    $env:DEVBOX_CLOUD_PENDING_RECEIPT=Join-Path $env:DEVBOX_WSROOT ('Tools\CloudPersistence\pending-'+[guid]::NewGuid().ToString('N')+'.json')
+    try {
+        & pwsh -NoLogo -NoProfile -NonInteractive -File (Join-Path $PSScriptRoot '..\scripts\save-state.ps1') -First
+        if ($LASTEXITCODE -ne 0) { throw 'Inner native save failed.' }
+        if ([IO.File]::ReadAllText($receipt) -cne $sentinel) { $failures+='Inner save exposed an uncommitted receipt.' }
+        if (-not (Test-Path -LiteralPath $env:DEVBOX_CLOUD_PENDING_RECEIPT)) { $failures+='Private transaction receipt missing.' }
+    } finally {
+        Remove-Item -LiteralPath $env:DEVBOX_CLOUD_PENDING_RECEIPT -Force -ErrorAction SilentlyContinue
+        $env:DEVBOX_CLOUD_INNER_SAVE=$null;$env:DEVBOX_CLOUD_PENDING_RECEIPT=$null
+    }
+    $commands=Join-Path $env:DEVBOX_CONTROL_PATH 'Commands'
+    New-Item -ItemType Directory -Path $commands -Force | Out-Null
+    $nonce=[guid]::NewGuid().ToString('N');'stop' | Set-Content -LiteralPath (Join-Path $commands "stop-$nonce.request")
+    $stop=Invoke-DevBoxControlRequests -ControlPath $env:DEVBOX_CONTROL_PATH -VerifiedSave {
+        '{"snapshotId":"local-only-new","utc":"new"}' | Set-Content -LiteralPath $receipt
+        return $true
+    }
+    if ($stop) { $failures+='Finish accepted local-only metadata under cloud selection.' }
+    Remove-Item -LiteralPath $receipt -Force
+    foreach ($failure in $failures) { Write-Host "REVIEW ATTACK FAILED: $failure" }
+    if ($failures.Count) { throw 'Cloud review boundary regressions failed.' }
+    Write-Host 'PRIVATE RECEIPT AND CLOUD GUARD ATTACKS PASS: uncommitted save never replaces prior receipt; local-only Finish refused; home and unrelated cache refused.'
     & (Join-Path $PSScriptRoot '..\scripts\save-state.ps1') -First
     if ($LASTEXITCODE -ne 0) { throw 'Cloud save failed.' }
     $receipt=Join-Path $env:DEVBOX_CONTROL_PATH 'last-backup.json'
