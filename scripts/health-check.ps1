@@ -77,8 +77,20 @@ if (Get-WindowsFeature | Where-Object { $_.Name -like 'RDS-*' -and $_.Installed 
 $persistPath = Join-Path $env:DEVBOX_CONTROL_PATH 'persistence.json'
 if (Test-Path $persistPath) {
     $persist = Get-Content $persistPath -Raw | ConvertFrom-Json
-    $tcp = New-Object System.Net.Sockets.TcpClient
-    try { $tcp.Connect($persist.storageIp, 8000) | Out-Null } catch { Add-Failure "rest-server unreachable $($persist.storageIp):8000" 'storage host down or Grant missing' } finally { $tcp.Dispose() }
+    if ($env:DEVBOX_PERSISTENCE_BACKEND -ceq 'github-release') {
+        if (-not (Test-DevBoxRepoDestination -Repo $persist.repoUrl) -or -not (Test-Path -LiteralPath (Join-Path $persist.repoUrl 'config'))) {
+            Add-Failure 'Cloud repository unavailable' 'fetch a verified checkpoint before startup'
+        }
+        $receiptPath=Join-Path $env:DEVBOX_CONTROL_PATH 'last-backup.json'
+        if (-not (Test-Path -LiteralPath $receiptPath)) { Add-Failure 'Cloud save receipt absent' 'complete a verified cloud save before READY' }
+        else {
+            $cloudReceipt=Get-Content -LiteralPath $receiptPath -Raw | ConvertFrom-Json
+            if (-not $cloudReceipt.PSObject.Properties['cloudVerified'] -or $cloudReceipt.cloudVerified -ne $true) { Add-Failure 'Cloud save not verified' 'publish and read back checkpoint; local-only save is insufficient' }
+        }
+    } else {
+        $tcp = New-Object System.Net.Sockets.TcpClient
+        try { $tcp.Connect($persist.storageIp, 8000) | Out-Null } catch { Add-Failure "rest-server unreachable $($persist.storageIp):8000" 'storage host down or Grant missing' } finally { $tcp.Dispose() }
+    }
     if (Test-Path (Join-Path $env:DEVBOX_CONTROL_PATH 'last-backup.json')) {
         # backup canary proof recorded by save-state; presence required after first save
         $lb = Get-Content (Join-Path $env:DEVBOX_CONTROL_PATH 'last-backup.json') -Raw | ConvertFrom-Json

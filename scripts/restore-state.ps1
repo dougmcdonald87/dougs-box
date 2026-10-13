@@ -21,6 +21,16 @@ if (-not (Test-Path -LiteralPath $persistenceFile -PathType Leaf)) {
     Stop-DevBox 'Dedicated DevBox persistence metadata missing.'
 }
 $persist = Get-Content -LiteralPath $persistenceFile -Raw | ConvertFrom-Json
+$cloudSelected=$env:DEVBOX_PERSISTENCE_BACKEND -ceq 'github-release'
+$cloudSelection=@{}
+if ($cloudSelected) {
+    if ($persist.PSObject.Properties['backend'] -eq $null -or $persist.backend -cne 'github-release' -or
+        $persist.PSObject.Properties['snapshotId'] -eq $null -or $persist.PSObject.Properties['receiptSnapshotId'] -eq $null -or
+        [string]$persist.snapshotId -cnotmatch '^[0-9a-f]{64}$' -or [string]$persist.receiptSnapshotId -cnotmatch '^[0-9a-f]{64}$') {
+        Stop-DevBox 'Cloud restore requires exact accepted snapshot identities.'
+    }
+    $cloudSelection=@{ExpectedReceiptId=[string]$persist.receiptSnapshotId;ExpectedSnapshotId=[string]$persist.snapshotId}
+}
 $repo = [string]$persist.repoUrl
 if (-not (Test-DevBoxRepoDestination -Repo $repo)) {
     Stop-DevBox 'Refusing restore: repository is not the dedicated Lenovo endpoint or an approved disposable CI test repository.'
@@ -31,6 +41,7 @@ if (-not (Test-DevBoxRepoDestination -Repo $repo)) {
 & $restic --repo $repo cat config 2>$null | Out-Null
 $repoStatus = $LASTEXITCODE
 if ($repoStatus -eq 10) {
+    if ($cloudSelected) { Stop-DevBox 'Accepted cloud repository is absent; empty restore refused.' }
     Write-DevBox INFO 'First session: dedicated DevBox repository does not yet exist; restore is not required.'
     exit 0
 }
@@ -49,6 +60,7 @@ try {
     Stop-DevBox 'Restic snapshots response was not valid JSON.'
 }
 if ($entries.Count -eq 0) {
+    if ($cloudSelected) { Stop-DevBox 'Accepted cloud repository has no snapshots; empty restore refused.' }
     Write-DevBox INFO 'Initialized DevBox repository contains no snapshots; nothing to restore.'
     exit 0
 }
@@ -56,7 +68,7 @@ if ($entries.Count -eq 0) {
 # when an earlier backup command exits 3 with unreadable source files.
 # Only post-canary receipts, or the exact known-good legacy ID, are eligible.
 try {
-    $latest = Select-DevBoxVerifiedSnapshot -ResticExe $restic -Repo $repo -Snapshots $entries -TempRoot (Join-Path $env:DEVBOX_WSROOT 'Temp')
+    $latest = Select-DevBoxVerifiedSnapshot -ResticExe $restic -Repo $repo -Snapshots $entries -TempRoot (Join-Path $env:DEVBOX_WSROOT 'Temp') @cloudSelection
 } catch {
     Stop-DevBox "Verified snapshot selection failed: $($_.Exception.Message)"
 }
