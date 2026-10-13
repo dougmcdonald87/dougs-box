@@ -11,11 +11,19 @@ on:
       - 'scripts/cloud_checkpoint.py'
       - 'tests/cloud-migration.tests.ps1'
       - 'tests/cloud-startup-workflow.tests.py'
+      - 'tests/cloud-candidate-logon.tests.ps1'
       - '.github/workflows/cloud-migration-validate.yml'
       - '.github/workflows/devbox.yml'
 permissions:
   contents: read
 jobs:
+  candidate-logon:
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - shell: pwsh
+        run: ./tests/cloud-candidate-logon.tests.ps1
   workflow-contract:
     runs-on: ubuntu-latest
     steps:
