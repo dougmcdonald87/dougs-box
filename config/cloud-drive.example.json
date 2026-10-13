@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "drive_letter": "E",
+  "portal": "REPLACE_VERIFIED_CLOUD_TAILSCALE_IPV4",
+  "target_iqn": "REPLACE_TARGET_IQN",
+  "disk_unique_id": "REPLACE_NATIVE_WINDOWS_DISK_UNIQUE_ID",
+  "partition_guid": "REPLACE_NATIVE_PARTITION_GUID",
+  "volume_unique_id": "REPLACE_NATIVE_VOLUME_UNIQUE_ID",
+  "volume_label": "REPLACE_VERIFIED_NTFS_LABEL",
+  "cloud_volume_id": "REPLACE_CLOUD_VOLUME_MARKER_ID"
+}

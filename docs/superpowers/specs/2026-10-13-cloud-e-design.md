@@ -1,0 +1,11 @@
+# Parallel cloud E: candidate
+
+Doug authorizes building independently using existing GitHub/terminal access. Existing C:/D:, DevBox startup, controls, credentials, historical repositories and audio settings must remain intact. New storage uses E: until explicit acceptance. No expenditure, trial-credit dependence or home-host dependency.
+
+First deployable component: native Windows read-only attachment of a preformatted cloud-exported iSCSI NTFS partition, identified by portal, target IQN, disk unique ID, partition GUID, volume unique ID, label and cloud marker. Refuse E collisions, C/D disk reuse, ambiguous disks/partitions, RAW/non-NTFS, wrong target or unsupported config before mutation. Never initialize/format/clear an existing disk. New session only; no changing existing target sessions. Roll back only actions owned by this invocation, preserving preexisting connections and disk flags.
+
+Readonly is an intentional pre-acceptance phase; it does not permit apps to save. A separate exact-volume writable canary uses exclusive creation, fsync and readback; it does not pretend local readback establishes provider crash durability. Probe paths stay on E: under the identified marker and refuse reparse paths. It never migrates real data or changes application settings. A later cloud target owner must establish exclusive writer fencing and free-only entitlement before writable attachment. No checkbox is substituted for actual ownership/cost evidence.
+
+Ship on feature branch only. New CI runs policy tests and real Windows disposable VHD attachment/readback with no tailnet, operational secrets or production disks. CI fixture creation/formatting lives exclusively in a test file and guards GITHUB_ACTIONS/RUNNER_TEMP and the exact newly created file disk. It cannot run against the user's live machine. No production startup integration before real cloud acceptance.
+
+Current blockers: no cloud storage account/endpoint/key identified; latest known Windows and relay jobs completed, no current DevBox tailnet node. GitHub credential is not cloud-storage entitlement. Build/test reusable attachment and acceptance tools while these facts remain unknown. Do not create a replacement Windows desktop, claim a fake cloud E:, restart the working system or silently switch providers.
