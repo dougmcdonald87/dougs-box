@@ -46,6 +46,16 @@ function Invoke-DevBoxControlRequests {
         if ($saveReturned -and $after -ne $before -and -not [string]::IsNullOrWhiteSpace($after)) {
             try {
                 $data = $after | ConvertFrom-Json -ErrorAction Stop
+                if ($env:DEVBOX_PERSISTENCE_BACKEND -ceq 'github-release') {
+                    $expectedChannel='production'
+                    if ($env:DEVBOX_ISOLATED_TEST -eq '1') { $expectedChannel="ci-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT" }
+                    if ($data.PSObject.Properties['cloudVerified'] -eq $null -or $data.cloudVerified -ne $true -or
+                        $data.PSObject.Properties['cloudChannel'] -eq $null -or $data.cloudChannel -cne $expectedChannel -or
+                        $data.PSObject.Properties['cloudGeneration'] -eq $null -or
+                        [string]$data.cloudGeneration -cnotmatch ('^devbox-checkpoint-v1-'+[regex]::Escape($expectedChannel)+'-\d{8}T\d{6}Z-[0-9a-f]{32}$')) {
+                        throw 'No committed verified cloud transaction receipt.'
+                    }
+                }
                 if (-not [string]::IsNullOrWhiteSpace([string]$data.snapshotId) -and
                     -not [string]::IsNullOrWhiteSpace([string]$data.utc)) {
                     $snapshotId = [string]$data.snapshotId
