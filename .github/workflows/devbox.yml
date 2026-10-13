@@ -234,9 +234,11 @@ jobs:
           sudo python3 -m venv /opt/devbox-terminal
           sudo /opt/devbox-terminal/bin/pip install --disable-pip-version-check paramiko==4.0.0
           sudo mkdir -p /opt/devbox-terminal/client
-          sudo cp scripts/devbox_terminal.py scripts/terminal-relay.py /opt/devbox-terminal/client/
+          sudo cp scripts/devbox_terminal.py scripts/terminal-relay.py scripts/devbox_lifecycle.py /opt/devbox-terminal/client/
           printf '%s\n' '#!/bin/sh' 'exec /opt/devbox-terminal/bin/python /opt/devbox-terminal/client/devbox_terminal.py "$@"' | sudo tee /usr/local/bin/devbox >/dev/null
           sudo chmod 755 /usr/local/bin/devbox
+          printf '%s\n' '#!/bin/sh' 'exec /opt/devbox-terminal/bin/python /opt/devbox-terminal/client/devbox_lifecycle.py "$@"' | sudo tee /usr/local/bin/devbox-control >/dev/null
+          sudo chmod 755 /usr/local/bin/devbox-control
 
       - name: Prove harmless Windows command and hold relay for this session
         shell: bash
