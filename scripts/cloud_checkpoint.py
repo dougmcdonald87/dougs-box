@@ -189,6 +189,7 @@ class GitHubRemote:
             raise CheckpointError('CI checkpoint channel identity mismatch')
         if not re.fullmatch(r'production|ci-\d+-\d+',channel):raise CheckpointError('Invalid checkpoint channel')
         self.channel=channel
+        self.drafts={}
     def call(self,*args):
         result=subprocess.run(['gh',*args,'--repo',self.repository],capture_output=True,text=True,timeout=300)
         if result.returncode:raise CheckpointError('GitHub transport operation failed')
@@ -198,6 +199,9 @@ class GitHubRemote:
         if not revision or not re.fullmatch(r'[0-9a-f]{40}',revision):raise CheckpointError('Pinned GitHub revision unavailable')
         self.call('release','create',tag,'--draft','--prerelease','--latest=false','--target',revision,
                   '--title','Encrypted DevBox development checkpoint','--notes','Verified encrypted software-development state. No plaintext user state.')
+        identity=json.loads(self.call('release','view',tag,'--json','databaseId'))['databaseId']
+        if type(identity)is not int or identity<=0:raise CheckpointError('Draft release identity unavailable')
+        self.drafts[tag]=identity
     def upload(self,tag,path):self.call('release','upload',tag,str(path))
     def api(self,endpoint):
         result=subprocess.run(['gh','api',endpoint],capture_output=True,text=True,timeout=300)
@@ -205,7 +209,9 @@ class GitHubRemote:
         return json.loads(result.stdout)
     def download(self,tag,name,destination,max_bytes):
         if type(max_bytes)is not int or not 0<max_bytes<=PART_BYTES:raise CheckpointError('Invalid download bound')
-        release=self.api(f'repos/{self.repository}/releases/tags/{tag}')
+        draft_id=getattr(self,'drafts',{}).get(tag)
+        endpoint=f'repos/{self.repository}/releases/{draft_id}' if draft_id else f'repos/{self.repository}/releases/tags/{tag}'
+        release=self.api(endpoint)
         matches=[asset for asset in release['assets'] if asset['name']==name]
         if len(matches)!=1 or type(matches[0]['size'])is not int or not 0<matches[0]['size']<=max_bytes:
             raise CheckpointError('Remote asset missing or exceeds bound')

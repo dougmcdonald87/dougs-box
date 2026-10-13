@@ -145,4 +145,14 @@ class CheckpointTests(unittest.TestCase):
                 with self.assertRaises(module.CheckpointError):remote.download('tag','checkpoint.json',destination,max_bytes=module.MANIFEST_BYTES)
         self.assertEqual(destination.read_bytes(),b'prior')
 
+    def test_draft_readback_uses_release_id_before_public_tag_exists(self):
+        remote=object.__new__(module.GitHubRemote);remote.repository='owner/repo';remote.drafts={'new-tag':123}
+        destination=self.root/'bounded.bin';destination.write_bytes(b'prior')
+        def metadata(endpoint):
+            if endpoint=='repos/owner/repo/releases/123':return {'assets':[{'name':'part.bin','id':7,'size':999}]}
+            raise module.CheckpointError('published tag does not exist for draft')
+        with patch.object(remote,'api',side_effect=metadata):
+            with self.assertRaisesRegex(module.CheckpointError,'exceeds bound'):remote.download('new-tag','part.bin',destination,max_bytes=8)
+        self.assertEqual(destination.read_bytes(),b'prior')
+
 if __name__=='__main__':unittest.main()
