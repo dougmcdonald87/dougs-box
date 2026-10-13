@@ -58,6 +58,17 @@ if ($Mode -eq 'Capture') {
     $before=[IO.File]::ReadAllBytes($receipt)
     $record=Get-Content -LiteralPath $receipt -Raw | ConvertFrom-Json
     if ($record.cloudVerified -ne $true -or -not $record.cloudGeneration) { throw 'Save lacks remote verification.' }
+    $identityAttack=@'
+import importlib.util,sys
+spec=importlib.util.spec_from_file_location('checkpoint',sys.argv[1]);module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+archive,restic,snapshot,receipt=sys.argv[2:]
+assert module.crypto_verify(archive,restic,{'snapshot_id':snapshot,'receipt_snapshot_id':receipt}) is True,'real encrypted receipt rejected'
+assert module.crypto_verify(archive,restic,{'snapshot_id':'c'*64,'receipt_snapshot_id':receipt}) is False,'invented data identity accepted'
+assert module.crypto_verify(archive,restic,{'snapshot_id':snapshot,'receipt_snapshot_id':'d'*64}) is False,'invented receipt identity accepted'
+print('ENCRYPTED IDENTITY ATTACK PASS: real receipt accepted; changed manifest data/receipt identities refused.')
+'@
+    & python -c $identityAttack (Join-Path $PSScriptRoot '..\scripts\cloud_checkpoint.py') (Join-Path $env:DEVBOX_WSROOT 'Tools\CloudPersistence\encrypted-checkpoint.zip') $env:DEVBOX_RESTIC_EXE $record.snapshotId $record.receiptSnapshotId
+    if ($LASTEXITCODE -ne 0) { throw 'Native encrypted identity attack failed.' }
     # Strongest integration attack: real local save succeeds, cloud auth then fails.
     # The existing Finish queue must refuse and the old receipt bytes must survive.
     . (Join-Path $PSScriptRoot '..\scripts\control-queue.ps1')

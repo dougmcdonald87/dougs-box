@@ -1,4 +1,4 @@
-import hashlib,importlib.util,json,pathlib,tempfile,unittest,zipfile
+import hashlib,importlib.util,io,json,pathlib,tempfile,unittest,zipfile
 from unittest.mock import patch
 
 path=pathlib.Path(__file__).resolve().parents[1]/'scripts/cloud_checkpoint.py'
@@ -120,5 +120,29 @@ class CheckpointTests(unittest.TestCase):
             limits.append(max_bytes);return original(tag,name,destination,max_bytes)
         with patch.object(self.remote,'download',side_effect=bounded):module.fetch_latest(self.remote,self.root/'out.zip')
         self.assertTrue(all(type(limit)is int and limit>0 for limit in limits))
+
+    def test_stream_size_race_is_cut_off_without_replacing_destination(self):
+        remote=object.__new__(module.GitHubRemote);remote.repository='owner/repo'
+        destination=self.root/'bounded.bin';destination.write_bytes(b'prior')
+        class Transfer:
+            def __init__(self):self.stdout=io.BytesIO(b'X'*1000);self.code=None
+            def kill(self):self.code=-9
+            def poll(self):return self.code
+            def wait(self):
+                if self.code is None:self.code=0
+                return self.code
+        transfer=Transfer()
+        with patch.object(remote,'api',return_value={'assets':[{'name':'part.bin','id':7,'size':8}]}):
+            with patch.object(module.subprocess,'Popen',return_value=transfer):
+                with self.assertRaises(module.CheckpointError):remote.download('tag','part.bin',destination,max_bytes=8)
+        self.assertEqual(destination.read_bytes(),b'prior')
+
+    def test_oversized_remote_metadata_refused_before_transfer(self):
+        remote=object.__new__(module.GitHubRemote);remote.repository='owner/repo'
+        destination=self.root/'bounded.bin';destination.write_bytes(b'prior')
+        with patch.object(remote,'api',return_value={'assets':[{'name':'checkpoint.json','id':7,'size':module.MANIFEST_BYTES+1}]}):
+            with patch.object(module.subprocess,'Popen',side_effect=AssertionError('must reject before transfer')):
+                with self.assertRaises(module.CheckpointError):remote.download('tag','checkpoint.json',destination,max_bytes=module.MANIFEST_BYTES)
+        self.assertEqual(destination.read_bytes(),b'prior')
 
 if __name__=='__main__':unittest.main()

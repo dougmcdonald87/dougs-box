@@ -20,11 +20,18 @@ $receipt=Join-Path $env:DEVBOX_CONTROL_PATH 'last-backup.json'
 $channel='production'
 if ($env:DEVBOX_ISOLATED_TEST -eq '1') { $channel="ci-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT" }
 $guard=$null
-$oldReceipt=$null
-$receiptCaptured=$false
 $wasInner=$env:DEVBOX_CLOUD_INNER_SAVE
+$wasPending=$env:DEVBOX_CLOUD_PENDING_RECEIPT
+$transactionReceipt=$null
 function Write-CloudState {
-    [ordered]@{backend='github-release';repoUrl=$repo;resticExe=$env:DEVBOX_RESTIC_EXE;channel=$channel} | ConvertTo-Json -Compress | Set-Content -LiteralPath $metadata -Encoding utf8
+    param($AcceptedRecord=$null)
+    $value=[ordered]@{backend='github-release';repoUrl=$repo;resticExe=$env:DEVBOX_RESTIC_EXE;channel=$channel}
+    if ($AcceptedRecord) {
+        $value.snapshotId=$AcceptedRecord.snapshot_id
+        $value.receiptSnapshotId=$AcceptedRecord.receipt_snapshot_id
+        $value.cloudGeneration=$AcceptedRecord.generation
+    }
+    $value | ConvertTo-Json -Compress | Set-Content -LiteralPath $metadata -Encoding utf8
     if ($env:GITHUB_ENV) {
         "DEVBOX_RESTIC_EXE=$env:DEVBOX_RESTIC_EXE" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
     }
@@ -74,20 +81,20 @@ try {
         } finally { $file.Dispose() }
         & $env:DEVBOX_RESTIC_EXE --repo $repo check --read-data | Out-Null
         if ($LASTEXITCODE -ne 0) { throw 'Installed encrypted repository failed verification.' }
-        Write-CloudState
+        Write-CloudState -AcceptedRecord $record
         Write-DevBox OK 'Cloud generation cryptographically checked; existing restore can now import C and workspace state.'
     } else {
         if (-not (Test-Path -LiteralPath $metadata)) { throw 'Cloud connection metadata missing.' }
         $state=Get-Content -LiteralPath $metadata -Raw | ConvertFrom-Json
         if ($state.backend -cne 'github-release' -or $state.repoUrl -ine $repo -or $state.channel -cne $channel) { throw 'Cloud repository metadata mismatch.' }
-        if (Test-Path -LiteralPath $receipt) { $oldReceipt=[IO.File]::ReadAllBytes($receipt) }
-        $receiptCaptured=$true
+        $transactionReceipt=Join-Path $runtime ('pending-'+[guid]::NewGuid().ToString('N')+'.json')
+        $env:DEVBOX_CLOUD_PENDING_RECEIPT=$transactionReceipt
         $env:DEVBOX_CLOUD_INNER_SAVE='1'
         $arguments=@('-NoLogo','-NoProfile','-NonInteractive','-File',(Join-Path $PSScriptRoot 'save-state.ps1'))
         if ($First) { $arguments+='-First' }
         & pwsh @arguments
         if ($LASTEXITCODE -ne 0) { throw 'Existing verified local save failed.' }
-        $local=Get-Content -LiteralPath $receipt -Raw | ConvertFrom-Json
+        $local=Get-Content -LiteralPath $transactionReceipt -Raw | ConvertFrom-Json
         if (Test-Path -LiteralPath $archive) { Remove-Item -LiteralPath $archive -Force }
         [IO.Compression.ZipFile]::CreateFromDirectory($repo,$archive)
         $archiveGuard=[IO.File]::Open($archive,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
@@ -101,21 +108,19 @@ try {
         $local | Add-Member -NotePropertyName cloudVerified -NotePropertyValue $true -Force
         $local | Add-Member -NotePropertyName cloudGeneration -NotePropertyValue $record.generation -Force
         $local | Add-Member -NotePropertyName cloudChannel -NotePropertyValue $channel -Force
-        $pending=$receipt+'.cloud-verified.tmp'
-        $local | ConvertTo-Json -Compress | Set-Content -LiteralPath $pending -Encoding utf8
-        Move-Item -LiteralPath $pending -Destination $receipt -Force
+        $local | ConvertTo-Json -Compress | Set-Content -LiteralPath $transactionReceipt -Encoding utf8
+        if (Test-Path -LiteralPath $receipt) { [IO.File]::Replace($transactionReceipt,$receipt,$null) }
+        else { [IO.File]::Move($transactionReceipt,$receipt) }
         Write-DevBox OK 'Cloud save published and read back; existing Save/Finish receipt contract satisfied.'
     }
 } catch {
-    if ($Mode -eq 'Save' -and $receiptCaptured) {
-        if ($null -ne $oldReceipt) { [IO.File]::WriteAllBytes($receipt,$oldReceipt) }
-        elseif (Test-Path -LiteralPath $receipt) { Remove-Item -LiteralPath $receipt -Force }
-    }
     Write-DevBox WARN 'Cloud operation failed; no cloud success claimed. Previous cloud generations are retained.'
     $global:LASTEXITCODE=2
     exit 2
 } finally {
     $env:DEVBOX_CLOUD_INNER_SAVE=$wasInner
+    $env:DEVBOX_CLOUD_PENDING_RECEIPT=$wasPending
+    if ($transactionReceipt) { Remove-Item -LiteralPath $transactionReceipt -Force -ErrorAction SilentlyContinue }
     if ($guard) { $guard.Dispose() }
 }
 $global:LASTEXITCODE=0

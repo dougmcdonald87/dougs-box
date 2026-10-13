@@ -88,12 +88,18 @@ function Invoke-DevboxRetry {
 # GitHub CI runners in the runner's own temporary directory.
 function Test-DevBoxRepoDestination {
     param([Parameter(Mandatory)][string]$Repo)
-    if ($Repo -ceq 'rest:http://100.70.202.110:8000/devbox/') { return $true }
-    if ($env:GITHUB_ACTIONS -eq 'true' -and $env:DEVBOX_PERSISTENCE_BACKEND -ceq 'github-release' -and
-        $env:DEVBOX_WSROOT -match '^[DE]:\\DevBox$') {
+    if ($env:DEVBOX_PERSISTENCE_BACKEND -ceq 'github-release') {
+        if ($env:GITHUB_ACTIONS -ne 'true' -or -not $env:DEVBOX_WSROOT -or $Repo -match '^rest:') { return $false }
+        $allowed=$env:DEVBOX_WSROOT -match '^[DE]:\\DevBox$'
+        if ($env:DEVBOX_ISOLATED_TEST -eq '1' -and $env:RUNNER_TEMP) {
+            $sep=[IO.Path]::DirectorySeparatorChar
+            $allowed=[IO.Path]::GetFullPath($env:DEVBOX_WSROOT).StartsWith([IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd($sep)+$sep,[StringComparison]::OrdinalIgnoreCase)
+        }
+        if (-not $allowed) { return $false }
         $cloud=[IO.Path]::GetFullPath((Join-Path $env:DEVBOX_WSROOT 'Tools\CloudPersistence\repository'))
-        if ([IO.Path]::GetFullPath($Repo) -ieq $cloud) { return $true }
+        return [IO.Path]::GetFullPath($Repo) -ieq $cloud
     }
+    if ($Repo -ceq 'rest:http://100.70.202.110:8000/devbox/') { return $true }
     if ($env:DEVBOX_ISOLATED_TEST -eq '1' -and $env:GITHUB_ACTIONS -eq 'true' -and $env:RUNNER_TEMP) {
         $sep = [System.IO.Path]::DirectorySeparatorChar
         $root = [System.IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd($sep) + $sep

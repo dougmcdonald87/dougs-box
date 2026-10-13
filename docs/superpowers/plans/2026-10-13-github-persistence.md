@@ -30,11 +30,13 @@ Produces publish(archive, snapshot_id, receipt_id, remote, max_bytes, part_bytes
 ### Task 2: existing save/restore adapter
 Files: scripts/cloud-persistence.ps1, common.ps1, connect-persistence.ps1, save-state.ps1, tests/cloud-persistence.tests.ps1 and candidate CI workflow.
 Consumes Task1 protocol; produces explicit github-release backend with local encrypted Tools cache, remote-gated receipt and normal existing restore.
-- [ ] Add real Windows/Restic Save/Finish interruption and cloud-only startup tests; run expected red before adapter.
-- [ ] Implement guarded opt-in adapter without changing default home behavior.
+- [x] Add real Windows/Restic Save/Finish interruption and cloud-only startup tests; run expected red before adapter.
+- [x] Implement guarded opt-in adapter without changing default home behavior.
 - [ ] Verify first migration, missing-cloud refusal, previous-generation recovery and actual cloud readback. Commit.
 
 ### Task 3: final review/checkpoint
 - [ ] Run required baseline/new suites, read all outputs, fix only important findings with RED/GREEN.
-- [ ] Fresh independent whole-branch review; one fix pass.
+- [x] Fresh independent whole-branch review; one fix pass (native verification pending).
 - [ ] Checkpoint evidence and blockers; no live activation/merge until accepted.
+
+Reviewed boundary corrections: crypto verifier now consumes manifest identities; exact encrypted receipt/data identity required before publication/recovery and carried into restore. Release discovery paginates all records. Downloads check asset metadata and cut streaming at declared limits. Inner saves use private receipts; only verified cloud publication atomically commits last-backup.json; Finish requires committed cloud metadata. Native RED38431444175, local19/19; final native GREEN pending.
