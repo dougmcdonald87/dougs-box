@@ -9,7 +9,7 @@ if (-not $env:DEVBOX_WSROOT -or -not $env:DEVBOX_CONTROL_PATH -or -not $env:REST
 $workspace=[IO.Path]::GetFullPath($env:DEVBOX_WSROOT).TrimEnd('\')
 $allowed=$workspace -match '^[DE]:\\DevBox$'
 if ($env:DEVBOX_ISOLATED_TEST -eq '1' -and $env:RUNNER_TEMP) {
-    $allowed=$workspace.StartsWith([IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\')+'\',[StringComparison]::OrdinalIgnoreCase)
+    $allowed=$workspace.StartsWith([IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\')+'\',[StringComparison]::OrdinalIgnoreCase) -or (Test-DevBoxIsolatedCandidateAlias)
 }
 if (-not $allowed) { Stop-DevBox 'Cloud cache must be inside the selected isolated DevBox workspace.' }
 $runtime=New-DevboxDirectorySafe (Join-Path $workspace 'Tools\CloudPersistence')

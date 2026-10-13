@@ -280,7 +280,7 @@ def crypto_verify(archive,restic,record):
 
 if __name__=='__main__':
     parser=argparse.ArgumentParser()
-    parser.add_argument('operation',choices=['publish','fetch'])
+    parser.add_argument('operation',choices=['publish','fetch','probe'])
     parser.add_argument('--repository',required=True)
     parser.add_argument('--channel',required=True)
     parser.add_argument('--archive',required=True)
@@ -289,7 +289,9 @@ if __name__=='__main__':
     args=parser.parse_args()
     try:
         remote=GitHubRemote(args.repository,args.channel)
-        if args.operation=='publish':
+        if args.operation=='probe':
+            record={'generations':remote.generations()}
+        elif args.operation=='publish':
             if not crypto_verify(args.archive,args.restic_exe,{'snapshot_id':args.snapshot_id,'receipt_snapshot_id':args.receipt_id}):raise CheckpointError('Encrypted repository verification failed; no upload')
             record=publish(args.archive,args.snapshot_id or '',args.receipt_id or '',remote)
         else:
