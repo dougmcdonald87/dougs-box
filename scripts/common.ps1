@@ -94,51 +94,7 @@ function Test-DevBoxIsolatedCandidateAlias {
     if (-not $root.StartsWith($temp,[StringComparison]::OrdinalIgnoreCase) -or
         [IO.Path]::GetFileName($root) -cne ('.devbox-cloud-candidate-'+$env:GITHUB_RUN_ID+'-'+$env:GITHUB_RUN_ATTEMPT)) { return $false }
     $aliases=@(& subst)
-    $matched=@($aliases | Where-Object { $_ -match '^E:\\: => (.+)
-    param([Parameter(Mandatory)][string]$Repo)
-    if ($env:DEVBOX_PERSISTENCE_BACKEND -ceq 'github-release') {
-        if ($env:GITHUB_ACTIONS -ne 'true' -or -not $env:DEVBOX_WSROOT -or $Repo -match '^rest:') { return $false }
-        $allowed=$env:DEVBOX_WSROOT -match '^[DE]:\\DevBox$'
-        if ($env:DEVBOX_ISOLATED_TEST -eq '1' -and $env:RUNNER_TEMP) {
-            $sep=[IO.Path]::DirectorySeparatorChar
-            $allowed=[IO.Path]::GetFullPath($env:DEVBOX_WSROOT).StartsWith([IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd($sep)+$sep,[StringComparison]::OrdinalIgnoreCase) -or (Test-DevBoxIsolatedCandidateAlias)
-        }
-        if (-not $allowed) { return $false }
-        $cloud=[IO.Path]::GetFullPath((Join-Path $env:DEVBOX_WSROOT 'Tools\CloudPersistence\repository'))
-        return [IO.Path]::GetFullPath($Repo) -ieq $cloud
-    }
-    if ($Repo -ceq 'rest:http://100.70.202.110:8000/devbox/') { return $true }
-    if ($env:DEVBOX_ISOLATED_TEST -eq '1' -and $env:GITHUB_ACTIONS -eq 'true' -and $env:RUNNER_TEMP) {
-        $sep = [System.IO.Path]::DirectorySeparatorChar
-        $root = [System.IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd($sep) + $sep
-        $full = [System.IO.Path]::GetFullPath($Repo)
-        return $full.StartsWith($root, [System.StringComparison]::OrdinalIgnoreCase)
-    }
-    return $false
-}
-
-function Test-SecretSet {
-    param(
-        [AllowEmptyString()][string]$SecretValue,
-        [string]$Name = 'secret'
-    )
-    if ([string]::IsNullOrWhiteSpace($SecretValue)) {
-        Stop-DevBox "$Name is empty. Next action: add it under Settings > Environments > devbox > Add secret."
-    }
-    if ($SecretValue.Length -lt 8) {
-        Stop-DevBox "$Name looks too short to be real. Next action: re-check the value in the devbox environment secrets list."
-    }
-}
-
-function Write-StepSummary {
-    # GH step summary. Public-safe fields only (Phase 36/54): no secrets,
-    # no environment dumps, no tailnet internals beyond the DevBox node name.
-    param([Parameter(Mandatory)][string[]]$Lines)
-    if ($env:GITHUB_STEP_SUMMARY) { $Lines | Add-Content -Path $env:GITHUB_STEP_SUMMARY -Encoding utf8 }
-}
-
-Write-DevBox INFO "common.ps1 loaded."
- -and $Matches[1] -ieq $root })
+    $matched=@($aliases | Where-Object { $_ -match '^E:\\: => (.+)$' -and $Matches[1] -ieq $root })
     if ($matched.Count -ne 1) { return $false }
     $marker=Join-Path $root 'DevBox\Tools\CloudPersistence\candidate-owner.json'
     if (-not (Test-Path -LiteralPath $marker -PathType Leaf)) { return $false }
@@ -153,7 +109,7 @@ function Test-DevBoxRepoDestination {
         $allowed=$env:DEVBOX_WSROOT -match '^[DE]:\\DevBox$'
         if ($env:DEVBOX_ISOLATED_TEST -eq '1' -and $env:RUNNER_TEMP) {
             $sep=[IO.Path]::DirectorySeparatorChar
-            $allowed=[IO.Path]::GetFullPath($env:DEVBOX_WSROOT).StartsWith([IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd($sep)+$sep,[StringComparison]::OrdinalIgnoreCase)
+            $allowed=[IO.Path]::GetFullPath($env:DEVBOX_WSROOT).StartsWith([IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd($sep)+$sep,[StringComparison]::OrdinalIgnoreCase) -or (Test-DevBoxIsolatedCandidateAlias)
         }
         if (-not $allowed) { return $false }
         $cloud=[IO.Path]::GetFullPath((Join-Path $env:DEVBOX_WSROOT 'Tools\CloudPersistence\repository'))
