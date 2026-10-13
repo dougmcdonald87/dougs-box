@@ -1,0 +1,61 @@
+name: C restore cloud feasibility
+on:
+  pull_request:
+    paths:
+      - 'tests/c-restore-cloud.spike.ps1'
+      - '.github/workflows/c-restore-cloud-proof.yml'
+permissions:
+  contents: read
+jobs:
+  capture:
+    runs-on: windows-2025
+    timeout-minutes: 8
+    outputs:
+      sha256: ${{ steps.capture.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - id: capture
+        shell: pwsh
+        run: ./tests/c-restore-cloud.spike.ps1 -Mode Capture -Archive "$env:RUNNER_TEMP/c-state.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: c-restore-fixture-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/c-state.zip
+          retention-days: 1
+          if-no-files-found: error
+  restore:
+    needs: capture
+    runs-on: windows-2025
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: c-restore-fixture-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/cloud-fetch
+      - name: Reject corrupt cloud snapshot before writing C
+        shell: pwsh
+        env:
+          EXPECTED_SHA256: ${{ needs.capture.outputs.sha256 }}
+        run: |
+          $bad = Join-Path $env:RUNNER_TEMP 'corrupt.zip'
+          [IO.File]::WriteAllText($bad, 'interrupted-or-corrupt-download')
+          $caught = $false
+          try { ./tests/c-restore-cloud.spike.ps1 -Mode Restore -Archive $bad -ExpectedSha256 $env:EXPECTED_SHA256 }
+          catch {
+            if ($_.Exception.Message -notlike 'Cloud archive checksum mismatch*') { throw }
+            $caught = $true
+          }
+          if (-not $caught) { throw 'Corrupt backup was accepted.' }
+          Write-Host 'ATTACK PASS: corrupt snapshot refused before C/registry restoration.'
+      - name: Restore actual C AppData and native registry on independent runner
+        shell: pwsh
+        env:
+          EXPECTED_SHA256: ${{ needs.capture.outputs.sha256 }}
+        run: ./tests/c-restore-cloud.spike.ps1 -Mode Restore -Archive "$env:RUNNER_TEMP/cloud-fetch/c-state.zip" -ExpectedSha256 $env:EXPECTED_SHA256
