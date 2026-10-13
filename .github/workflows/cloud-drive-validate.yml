@@ -1,0 +1,42 @@
+name: Cloud E candidate validation
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/cloud_drive.py'
+      - 'scripts/probe_cloud_drive.py'
+      - 'scripts/*cloud-drive*.ps1'
+      - 'tests/cloud-drive*'
+      - 'config/cloud-drive.example.json'
+      - '.github/workflows/cloud-drive-validate.yml'
+permissions:
+  contents: read
+jobs:
+  policy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - run: python3 tests/cloud-drive.tests.py
+      - if: ${{ always() }}
+        run: python3 tests/cloud-drive-probe.tests.py
+  windows-native:
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - name: Real E volume identity, readonly attachment, rollback and canary
+        shell: pwsh
+        run: ./tests/cloud-drive-windows.tests.ps1
+      - name: Connection ownership under competing session responses
+        if: ${{ always() }}
+        shell: pwsh
+        run: ./tests/cloud-drive-session.tests.ps1
+      - name: Windows bound-directory canary behavior
+        if: ${{ always() }}
+        shell: pwsh
+        run: python tests/cloud-drive-probe.tests.py
