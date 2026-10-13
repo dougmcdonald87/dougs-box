@@ -9,6 +9,8 @@ Set-StrictMode -Version Latest
 if ($env:GITHUB_ACTIONS -ne 'true' -or -not $env:RUNNER_TEMP) { throw 'Disposable GitHub CI only.' }
 $id = "$($env:GITHUB_RUN_ID)-$($env:GITHUB_RUN_ATTEMPT)"
 if ($id -notmatch '^\d+-\d+$') { throw 'Invalid fixture identity.' }
+$machineId = [string](Get-CimInstance -ClassName Win32_ComputerSystemProduct -ErrorAction Stop).UUID
+if ($machineId -notmatch '^[a-fA-F0-9-]{36}$' -or $machineId -eq '00000000-0000-0000-0000-000000000000') { throw 'Missing native VM identity.' }
 $profile = Join-Path $env:LOCALAPPDATA "DevBoxPersistenceProbe\$id"
 if ([IO.Path]::GetPathRoot($profile) -ine 'C:\') { throw 'This test requires actual C: AppData.' }
 $key = "HKCU:\Software\DevBoxPersistenceProbe\$id"
@@ -48,7 +50,7 @@ try {
         foreach ($name in @('settings.json','history.db','cache.bin')) {
             Copy-Item -LiteralPath (Join-Path $profile $name) -Destination (Join-Path $stage $name)
         }
-        $manifest = [ordered]@{schema=1;fixture_id=$id;source_host=$env:COMPUTERNAME;source_job=$env:GITHUB_JOB;files=@()}
+        $manifest = [ordered]@{schema=1;fixture_id=$id;source_host=$env:COMPUTERNAME;source_machine_id=$machineId;source_job=$env:GITHUB_JOB;files=@()}
         foreach ($name in $files) {
             $manifest.files += [ordered]@{name=$name;sha256=(Get-FileHash -LiteralPath (Join-Path $stage $name) -Algorithm SHA256).Hash.ToLowerInvariant()}
         }
@@ -65,7 +67,8 @@ try {
         Assert-Equal $manifest.schema 1 'Wrong manifest schema.'
         Assert-Equal $manifest.fixture_id $id 'Snapshot belongs to a different test.'
         if ($manifest.source_job -eq $env:GITHUB_JOB) { throw 'Restore must use a separate CI job.' }
-        if ($manifest.source_host -eq $env:COMPUTERNAME) { throw 'Restore must use a fresh Windows host.' }
+        if ($manifest.source_machine_id -eq $machineId) { throw 'Restore must use a fresh Windows VM.' }
+        Write-Host "Distinct native VM identities verified: capture $($manifest.source_machine_id), restore $machineId"
         if (@($manifest.files).Count -ne $files.Count) { throw 'Incomplete snapshot.' }
         foreach ($name in $files) {
             $entry = @($manifest.files | Where-Object { $_.name -ceq $name })
