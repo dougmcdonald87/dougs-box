@@ -16,6 +16,15 @@ on:
         options:
           - start
           - inspect
+      persistence_backend:
+        description: 'Existing home storage, verified cloud E candidate, or first migration of existing backup to cloud E'
+        required: true
+        type: choice
+        default: home
+        options:
+          - home
+          - github-release
+          - migrate-to-github
 
 permissions:
   contents: read
@@ -82,6 +91,14 @@ jobs:
     runs-on: ${{ needs.preflight.outputs.label }}
     environment: devbox
     timeout-minutes: 350
+    permissions:
+      contents: write
+      id-token: write
+      actions: read
+    env:
+      DEVBOX_PERSISTENCE_SELECTION: ${{ inputs.persistence_backend || 'home' }}
+      DEVBOX_PERSISTENCE_BACKEND: ${{ inputs.persistence_backend == 'github-release' && 'github-release' || 'home' }}
+      GH_TOKEN: ${{ github.token }}
     concurrency:
       group: devbox-windows-session
       cancel-in-progress: false
@@ -99,7 +116,7 @@ jobs:
 
       - name: Bootstrap workspace root and structure
         shell: pwsh
-        run: ./scripts/bootstrap.ps1
+        run: ./scripts/bootstrap.ps1 -CloudCandidate:($env:DEVBOX_PERSISTENCE_SELECTION -ne 'home')
 
       - name: Configure UK timezone (GMT/BST) and verify DST
         shell: pwsh
@@ -136,7 +153,7 @@ jobs:
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: ./scripts/install-opencode.ps1 -ToolsRoot "${{ steps.storage.outputs.fastRoot }}\DevBox\Tools"
+        run: ./scripts/install-opencode.ps1 -ToolsRoot "$env:DEVBOX_WSROOT\Tools"
 
       - name: Configure RDP (runneradmin preferred, NLA kept)
         shell: pwsh
@@ -152,7 +169,7 @@ jobs:
         shell: pwsh
         run: ./scripts/configure-terminal.ps1
 
-      - name: Connect persistence (restic over Tailscale)
+      - name: Connect selected persistence
         shell: pwsh
         env:
           RESTIC_PASSWORD: ${{ secrets.RESTIC_PASSWORD }}
@@ -162,12 +179,22 @@ jobs:
         run: ./scripts/connect-persistence.ps1
 
       - name: Restore state (HOT first, Git canonical, small overlay)
+        if: ${{ inputs.persistence_backend != 'migrate-to-github' }}
         shell: pwsh
         env:
           RESTIC_PASSWORD: ${{ secrets.RESTIC_PASSWORD }}
           RESTIC_REST_USERNAME: devbox
           RESTIC_REST_PASSWORD: ${{ secrets.DEVBOX_STORAGE_PASSWORD }}
         run: ./scripts/restore-state.ps1
+
+      - name: Migrate verified existing source to cloud E candidate
+        if: ${{ inputs.persistence_backend == 'migrate-to-github' }}
+        shell: pwsh
+        env:
+          RESTIC_PASSWORD: ${{ secrets.RESTIC_PASSWORD }}
+          RESTIC_REST_USERNAME: devbox
+          RESTIC_REST_PASSWORD: ${{ secrets.DEVBOX_STORAGE_PASSWORD }}
+        run: ./scripts/migrate-cloud-persistence.ps1
 
       - name: First canary + backup proof
         shell: pwsh

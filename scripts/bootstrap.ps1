@@ -2,6 +2,7 @@
 # Installs nothing yet. Creates the workspace tree on the volume that
 # qualifies (same rules as discover-storage) and records which tools the
 # runner image already provides so later steps reuse instead of reinstall.
+param([switch]$CloudCandidate)
 Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot 'common.ps1')
 
@@ -41,6 +42,11 @@ if ($volumes.Count -eq 0) {
 }
 
 $fastRoot = $volumes[0].DeviceID
+if ($CloudCandidate) {
+    . (Join-Path $PSScriptRoot 'cloud-candidate-drive.ps1')
+    try { $fastRoot=Initialize-DevBoxCloudCandidateDrive -PhysicalRoot $fastRoot -RequiredGiB $requireFreeGiB }
+    catch { Stop-DevBox 'Candidate E creation refused; existing D/E remain unchanged.' }
+}
 Write-DevBox OK "fast workspace root: $fastRoot ($requireFreeGiB+ GiB free verified)"
 
 # ---- Phase 9 structure

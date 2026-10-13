@@ -86,8 +86,35 @@ function Invoke-DevboxRetry {
 # Enforce that production restic operations can target ONLY the dedicated
 # Lenovo DevBox repository. Test mode is permitted exclusively on disposable
 # GitHub CI runners in the runner's own temporary directory.
+function Test-DevBoxIsolatedCandidateAlias {
+    if ($env:DEVBOX_ISOLATED_TEST -ne '1' -or $env:GITHUB_ACTIONS -ne 'true' -or
+        $env:DEVBOX_WSROOT -cne 'E:\DevBox' -or -not $env:RUNNER_TEMP -or -not $env:DEVBOX_CLOUD_CANDIDATE_ROOT) { return $false }
+    $root=[IO.Path]::GetFullPath($env:DEVBOX_CLOUD_CANDIDATE_ROOT)
+    $temp=[IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\')+'\'
+    if (-not $root.StartsWith($temp,[StringComparison]::OrdinalIgnoreCase) -or
+        [IO.Path]::GetFileName($root) -cne ('.devbox-cloud-candidate-'+$env:GITHUB_RUN_ID+'-'+$env:GITHUB_RUN_ATTEMPT)) { return $false }
+    $aliases=@(& subst)
+    $matched=@($aliases | Where-Object { $_ -match '^E:\\: => (.+)$' -and $Matches[1] -ieq $root })
+    if ($matched.Count -ne 1) { return $false }
+    $marker=Join-Path $root 'DevBox\Tools\CloudPersistence\candidate-owner.json'
+    if (-not (Test-Path -LiteralPath $marker -PathType Leaf)) { return $false }
+    $owner=Get-Content -LiteralPath $marker -Raw | ConvertFrom-Json
+    return $owner.runId -ceq $env:GITHUB_RUN_ID -and $owner.attempt -ceq $env:GITHUB_RUN_ATTEMPT -and $owner.root -ieq $root
+}
+
 function Test-DevBoxRepoDestination {
     param([Parameter(Mandatory)][string]$Repo)
+    if ($env:DEVBOX_PERSISTENCE_BACKEND -ceq 'github-release') {
+        if ($env:GITHUB_ACTIONS -ne 'true' -or -not $env:DEVBOX_WSROOT -or $Repo -match '^rest:') { return $false }
+        $allowed=$env:DEVBOX_WSROOT -match '^[DE]:\\DevBox$'
+        if ($env:DEVBOX_ISOLATED_TEST -eq '1' -and $env:RUNNER_TEMP) {
+            $sep=[IO.Path]::DirectorySeparatorChar
+            $allowed=[IO.Path]::GetFullPath($env:DEVBOX_WSROOT).StartsWith([IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd($sep)+$sep,[StringComparison]::OrdinalIgnoreCase) -or (Test-DevBoxIsolatedCandidateAlias)
+        }
+        if (-not $allowed) { return $false }
+        $cloud=[IO.Path]::GetFullPath((Join-Path $env:DEVBOX_WSROOT 'Tools\CloudPersistence\repository'))
+        return [IO.Path]::GetFullPath($Repo) -ieq $cloud
+    }
     if ($Repo -ceq 'rest:http://100.70.202.110:8000/devbox/') { return $true }
     if ($env:DEVBOX_ISOLATED_TEST -eq '1' -and $env:GITHUB_ACTIONS -eq 'true' -and $env:RUNNER_TEMP) {
         $sep = [System.IO.Path]::DirectorySeparatorChar
