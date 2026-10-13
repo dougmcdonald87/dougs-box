@@ -21,7 +21,7 @@ New-Item -ItemType Directory -Path $dir | Out-Null
 $file=Join-Path $dir 'owned-test.vhdx'
 $dp=Join-Path $dir 'create.txt'
 $detach=Join-Path $dir 'detach.txt'
-$disk=$null;$partition=$null
+$disk=$null;$partition=$null;$regressionFailures=@()
 try {
     @("create vdisk file=`"$file`" maximum=128 type=expandable", "select vdisk file=`"$file`"",'attach vdisk','exit') | Set-Content -LiteralPath $dp
     & diskpart.exe /s $dp
@@ -51,7 +51,7 @@ try {
     try {
         Assert-Refused { Mount-DevBoxCloudCandidate -Plan $plan } 'mounted'
         if ((Get-Disk -Number $disk.Number).IsReadOnly) { throw 'Mounted sibling affected by disk readonly.' }
-    } finally {
+    } catch { $regressionFailures+=('Sibling: '+$_.Exception.Message) } finally {
         $p=Storage\Get-Partition -DiskNumber $disk.Number -PartitionNumber $partition.PartitionNumber
         if ($p.DriveLetter -eq 'E') { Remove-PartitionAccessPath -DiskNumber $disk.Number -PartitionNumber $partition.PartitionNumber -AccessPath 'E:\' }
         Set-Disk -Number $disk.Number -IsReadOnly $false
@@ -69,7 +69,7 @@ try {
     try {
         Assert-Refused { Mount-DevBoxCloudCandidate -Plan $plan } 'inventory unavailable'
         if ((Get-Disk -Number $disk.Number).IsReadOnly) { throw 'Inventory failure mutated disk.' }
-    } finally {
+    } catch { $regressionFailures+=('Protected inventory: '+$_.Exception.Message) } finally {
         Remove-Item Function:\global:Get-Partition
         $p=Get-Partition -DiskNumber $disk.Number -PartitionNumber $partition.PartitionNumber
         if ($p.DriveLetter -eq 'E') { Remove-PartitionAccessPath -DiskNumber $disk.Number -PartitionNumber $partition.PartitionNumber -AccessPath 'E:\' }
@@ -93,6 +93,7 @@ try {
     Set-Disk -Number $disk.Number -IsReadOnly $false
     python (Join-Path $PSScriptRoot '../scripts/probe_cloud_drive.py') --root 'E:\' --cloud-volume-id ci-disposable-volume
     if ($LASTEXITCODE -ne 0) { throw 'Fixture canary flush/readback failed.' }
+    if ($regressionFailures.Count) { throw ($regressionFailures -join '; ') }
     Write-Output 'WINDOWS DISPOSABLE E DEVICE FLUSH AND LOCAL READBACK: PASS; CLOUD DURABILITY NOT TESTED'
 } finally {
     if ($null -ne $disk) {

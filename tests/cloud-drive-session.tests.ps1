@@ -31,13 +31,15 @@ function global:Disconnect-IscsiTarget {
  param($NodeAddress,$SessionIdentifier,[switch]$Confirm)
  $global:CloudTestDisconnected+= [string]$SessionIdentifier
 }
+$failures=@()
 try {
  foreach ($case in @('both','only-other')) {
    $global:CloudTestCase=$case;$global:CloudTestSessionsCalls=0;$global:CloudTestDisconnected=@();$refused=$false
    try { & $connector -ConfigPath $configPath | Out-Null } catch { $refused=$true }
    if (-not $refused) { throw 'Wrong/absent owned session was accepted.' }
-   if (($global:CloudTestDisconnected -join ',') -ne 'owned-A') { throw "Cleanup must target own result A, never B: case=$case observed=$($global:CloudTestDisconnected -join ',')" }
+   if (($global:CloudTestDisconnected -join ',') -ne 'owned-A') { $failures+= "Cleanup must target own result A, never B: case=$case observed=$($global:CloudTestDisconnected -join ',')" }
  }
+ if ($failures.Count) { throw ($failures -join '; ') }
  Write-Output 'CLOUD CONNECTION OWNED-SESSION CONCURRENCY BOUNDARY: PASS (CONTROLLED API RESPONSES, NO REAL TARGET)'
 } finally {
  foreach ($name in @('Get-Service','Connect-IscsiTarget','Wait-Job','Receive-Job','Remove-Job','Get-IscsiSession','Get-IscsiConnection','Disconnect-IscsiTarget')) { Remove-Item ('Function:\global:'+ $name) }
