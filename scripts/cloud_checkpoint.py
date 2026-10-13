@@ -289,5 +289,7 @@ if __name__=='__main__':
         else:
             record=fetch_latest(remote,args.archive,verify=lambda p,r:crypto_verify(p,args.restic_exe,r))
         print(json.dumps(record,separators=(',',':')))
-    except Exception:
-        parser.exit(2,'Cloud checkpoint failed; no save/restore success claimed.\n')
+    except Exception as error:
+        # Owned error messages contain no raw subprocess output, URLs or credentials.
+        detail=str(error) if isinstance(error,CheckpointError) else type(error).__name__
+        parser.exit(2,'Cloud checkpoint failed ('+detail+'); no save/restore success claimed.\n')
