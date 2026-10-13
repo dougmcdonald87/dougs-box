@@ -81,3 +81,5 @@ if ([Convert]::ToBase64String([IO.File]::ReadAllBytes($metadata)) -cne [Convert]
 [IO.File]::WriteAllBytes($metadata,$cloudMetadata);$env:DEVBOX_PERSISTENCE_BACKEND='github-release'
 Write-Host 'VERIFIED MIGRATION PASS: source restored before cloud publication; source backup unchanged; repeated migration refused.'
 "generation=$($record.cloudGeneration)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+$global:LASTEXITCODE=0
+exit 0

@@ -10,11 +10,17 @@ on:
       - 'scripts/restore-state.ps1'
       - 'scripts/cloud_checkpoint.py'
       - 'tests/cloud-migration.tests.ps1'
+      - 'tests/cloud-startup-workflow.tests.py'
       - '.github/workflows/cloud-migration-validate.yml'
       - '.github/workflows/devbox.yml'
 permissions:
   contents: read
 jobs:
+  workflow-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - run: python3 tests/cloud-startup-workflow.tests.py
   denied:
     if: github.event.pull_request.head.repo.full_name == github.repository
     runs-on: windows-2025
@@ -44,6 +50,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RESTIC_PASSWORD: ${{ secrets.RESTIC_PASSWORD }}
         run: ./tests/cloud-migration.tests.ps1 -Mode Capture
+      - name: Verify migration backend survives into the next Actions step
+        shell: pwsh
+        run: |
+          if ($env:DEVBOX_PERSISTENCE_BACKEND -cne 'github-release') { throw 'Migration backend did not persist to the next step.' }
+          if ($env:DEVBOX_CLOUD_CANDIDATE_ROOT -notlike "$env:RUNNER_TEMP\*") { throw 'Candidate ownership did not persist.' }
+          Write-Host 'MIGRATION ENVIRONMENT PASS: next step receives cloud backend and owned candidate root.'
   restore:
     needs: capture
     runs-on: windows-2025
