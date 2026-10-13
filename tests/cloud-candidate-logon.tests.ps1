@@ -11,9 +11,9 @@ $probe=Join-Path $env:RUNNER_TEMP ('logon-probe-'+[guid]::NewGuid().ToString('N'
 New-Item -ItemType Directory -Path $probe -Force | Out-Null
 try {
     # Give this disposable account access only to owned fixture/probe directories.
-    & icacls $probe /grant "$($account.SID.Value):(OI)(CI)M" | Out-Null
+    & icacls $probe /grant "*$($account.SID.Value):(OI)(CI)M" | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Probe ACL setup failed.' }
-    & icacls $env:DEVBOX_CLOUD_CANDIDATE_ROOT /grant "$($account.SID.Value):(OI)(CI)RX" /T | Out-Null
+    & icacls $env:DEVBOX_CLOUD_CANDIDATE_ROOT /grant "*$($account.SID.Value):(OI)(CI)RX" /T | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Candidate fixture ACL setup failed.' }
     $script=Join-Path $probe 'probe.ps1';$result=Join-Path $probe 'visible.txt'
     @'
