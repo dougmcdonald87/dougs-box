@@ -7,6 +7,10 @@ Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot 'drive-data.ps1')
 . (Join-Path $PSScriptRoot 'restic-diagnostics.ps1')
 Write-Step 'save-state'
+if ($env:DEVBOX_PERSISTENCE_BACKEND -ceq 'github-release' -and $env:DEVBOX_CLOUD_INNER_SAVE -ne '1') {
+    & (Join-Path $PSScriptRoot 'cloud-persistence.ps1') -Mode Save -First:$First
+    exit $LASTEXITCODE
+}
 
 if ([string]::IsNullOrWhiteSpace($env:RESTIC_PASSWORD)) {
     Stop-DevBox 'RESTIC_PASSWORD is missing; refuse to create an unverified backup.'
