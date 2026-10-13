@@ -3,6 +3,13 @@ Set-StrictMode -Version Latest
 if ($env:GITHUB_ACTIONS -ne 'true' -or -not $env:RUNNER_TEMP) { throw 'Disposable GitHub test runner only; never a live DevBox.' }
 if (-not (Test-Path (Join-Path $PSScriptRoot '../scripts/cloud-drive-windows.ps1'))) { throw 'CLOUD E FEATURE NOT IMPLEMENTED: Windows mount helper is missing.' }
 . (Join-Path $PSScriptRoot '../scripts/cloud-drive-windows.ps1')
+$connector=Join-Path $PSScriptRoot '../scripts/connect-cloud-drive.ps1'
+if (-not (Test-Path $connector)) { throw 'CLOUD E CONNECTOR NOT IMPLEMENTED: prerequisite inventory and connection guard missing.' }
+& pwsh -NoProfile -File $connector -ConfigPath (Join-Path $PSScriptRoot '../config/cloud-drive.example.json') 2>&1 | Out-Null
+if ($LASTEXITCODE -eq 0) { throw 'Unconfigured target accepted by actual connector.' }
+$inspection=(& pwsh -NoProfile -File $connector -InspectOnly | Out-String) | ConvertFrom-Json
+if ($LASTEXITCODE -ne 0 -or $inspection.status -ne 'inspection_only' -or $inspection.disk_mutations -ne 0) { throw 'Prerequisite inventory failed or claimed mutation.' }
+
 function Assert-Refused([scriptblock]$Action,[string]$Pattern) {
     $caught=$false
     try { & $Action | Out-Null } catch { if ($_.Exception.Message -notmatch $Pattern) { throw };$caught=$true }
