@@ -16,11 +16,17 @@ function Select-DevBoxVerifiedSnapshot {
         [Parameter(Mandatory)][string]$ResticExe,
         [Parameter(Mandatory)][string]$Repo,
         [Parameter(Mandatory)][object[]]$Snapshots,
-        [Parameter(Mandatory)][string]$TempRoot
+        [Parameter(Mandatory)][string]$TempRoot,
+        [string]$ExpectedReceiptId='',
+        [string]$ExpectedSnapshotId=''
     )
     $tag = 'devbox-verified-receipt-v1'
     $receipts = @($Snapshots | Where-Object { Test-DevBoxSnapshotHasTag -Snapshot $_ -Tag $tag } |
         Sort-Object { [DateTime]::Parse([string]$_.time) } -Descending)
+    if ($ExpectedReceiptId) {
+        $receipts=@($receipts | Where-Object { [string]$_.id -ceq $ExpectedReceiptId })
+        if ($receipts.Count -ne 1 -or $ExpectedSnapshotId -cnotmatch '^[0-9a-f]{64}$') { throw 'Accepted cloud snapshot identities missing.' }
+    }
     if ($receipts.Count -eq 0) {
         # The single known-good pre-receipt backup is grounded in job #14's
         # restored canary log, not inferred merely from a snapshot listing.
@@ -42,6 +48,7 @@ function Select-DevBoxVerifiedSnapshot {
         $files = @(Get-ChildItem -LiteralPath $stage -Recurse -File -Filter 'DEVBOX-VERIFIED-RECEIPT.json' -ErrorAction Stop)
         if ($files.Count -ne 1) { throw 'Verified receipt is missing or ambiguous.' }
         $proof = Get-Content -LiteralPath $files[0].FullName -Raw | ConvertFrom-Json -ErrorAction Stop
+        if ($ExpectedSnapshotId -and [string]$proof.snapshotId -cne $ExpectedSnapshotId) { throw 'Cloud manifest and encrypted receipt disagree.' }
         if ($proof.version -ne 1 -or
             [string]$proof.snapshotId -cnotmatch '^[0-9a-f]{64}$' -or
             [string]$proof.canaryHash -cnotmatch '^[0-9A-Fa-f]{64}$') {

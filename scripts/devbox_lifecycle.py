@@ -93,7 +93,9 @@ def status(token=None):
                                     'conclusion': runs[0].get('conclusion')} if runs else None)}
 
 
-def start(token):
+def start(token, backend='home'):
+    if backend not in ('home','github-release','migrate-to-github'):
+        raise DevBoxError('Unsupported persistence backend. Nothing started.')
     if not token:
         raise DevBoxError('GitHub write credential missing. Nothing started.')
     active = [r for r in current_runs(token) if r['status'] != 'completed']
@@ -101,8 +103,11 @@ def start(token):
         raise DevBoxError(f'Existing workflow run {active[0]["id"]} is {active[0]["status"]}. Nothing started.')
     # Exactly one POST; uncertain delivery is never retried automatically.
     # Server preflight + Windows serialization remain the cross-device guard.
+    inputs = {'operation':'start'}
+    if backend != 'home':
+        inputs['persistence_backend'] = backend
     code, result = request(ROOT + '/dispatches', token,
-                           {'ref': 'main', 'inputs': {'operation': 'start'}})
+                           {'ref': 'main', 'inputs': inputs})
     if code == 200:
         if not isinstance(result, dict) or type(result.get('workflow_run_id')) is not int or result['workflow_run_id'] <= 0:
             raise DevBoxError('Start response lacks a valid run ID. Delivery uncertain; check Actions before another request.')
@@ -152,13 +157,15 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command', choices=('status', 'start', 'save', 'stop'))
     parser.add_argument('--run-id', type=int)
+    parser.add_argument('--backend', choices=('home','github-release','migrate-to-github'), default='home',
+                        help='Persistence selection for manual start; normal default remains home.')
     parser.add_argument('--state', type=Path, default=Path('/run/devbox-control'))
     args = parser.parse_args(argv)
     try:
         if args.command == 'status':
             result = status(existing_token())
         elif args.command == 'start':
-            result = start(existing_token(required=True))
+            result = start(existing_token(required=True), args.backend)
         else:
             if args.run_id is None or args.run_id <= 0:
                 raise DevBoxError('Use --run-id with the exact current Windows workflow run.')
