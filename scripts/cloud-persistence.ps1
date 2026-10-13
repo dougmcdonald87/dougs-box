@@ -113,7 +113,9 @@ try {
         $local | Add-Member -NotePropertyName cloudGeneration -NotePropertyValue $record.generation -Force
         $local | Add-Member -NotePropertyName cloudChannel -NotePropertyValue $channel -Force
         $local | ConvertTo-Json -Compress | Set-Content -LiteralPath $transactionReceipt -Encoding utf8
-        if (Test-Path -LiteralPath $receipt) { [IO.File]::Replace($transactionReceipt,$receipt,$null) }
+        # PowerShell converts $null to an empty string for a .NET string parameter.
+        # File.Replace requires a true null when no backup filename is requested.
+        if (Test-Path -LiteralPath $receipt) { [IO.File]::Replace($transactionReceipt,$receipt,[System.Management.Automation.Language.NullString]::Value) }
         else { [IO.File]::Move($transactionReceipt,$receipt) }
         Write-DevBox OK 'Cloud save published and read back; existing Save/Finish receipt contract satisfied.'
     }
