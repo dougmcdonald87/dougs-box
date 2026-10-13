@@ -23,6 +23,7 @@ $guard=$null
 $wasInner=$env:DEVBOX_CLOUD_INNER_SAVE
 $wasPending=$env:DEVBOX_CLOUD_PENDING_RECEIPT
 $transactionReceipt=$null
+$stage='lock'
 function Write-CloudState {
     param($AcceptedRecord=$null)
     $value=[ordered]@{backend='github-release';repoUrl=$repo;resticExe=$env:DEVBOX_RESTIC_EXE;channel=$channel}
@@ -84,6 +85,7 @@ try {
         Write-CloudState -AcceptedRecord $record
         Write-DevBox OK 'Cloud generation cryptographically checked; existing restore can now import C and workspace state.'
     } else {
+        $stage='local-save'
         if (-not (Test-Path -LiteralPath $metadata)) { throw 'Cloud connection metadata missing.' }
         $state=Get-Content -LiteralPath $metadata -Raw | ConvertFrom-Json
         if ($state.backend -cne 'github-release' -or $state.repoUrl -ine $repo -or $state.channel -cne $channel) { throw 'Cloud repository metadata mismatch.' }
@@ -97,6 +99,7 @@ try {
         $local=Get-Content -LiteralPath $transactionReceipt -Raw | ConvertFrom-Json
         if (Test-Path -LiteralPath $archive) { Remove-Item -LiteralPath $archive -Force }
         [IO.Compression.ZipFile]::CreateFromDirectory($repo,$archive)
+        $stage='cloud-publication'
         $archiveGuard=[IO.File]::Open($archive,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
         try {
             $raw=& python (Join-Path $PSScriptRoot 'cloud_checkpoint.py') publish --repository $env:GITHUB_REPOSITORY --channel $channel --archive $archive --restic-exe $env:DEVBOX_RESTIC_EXE --snapshot-id $local.snapshotId --receipt-id $local.receiptSnapshotId
@@ -104,6 +107,7 @@ try {
         } finally { $archiveGuard.Dispose() }
         if ($publishExit -ne 0) { throw 'Cloud publication/readback failed; no successful receipt.' }
         $record=($raw | Out-String) | ConvertFrom-Json
+        $stage='commit-receipt'
         if ($record.snapshot_id -cne $local.snapshotId -or $record.receipt_snapshot_id -cne $local.receiptSnapshotId) { throw 'Published snapshot receipt mismatch.' }
         $local | Add-Member -NotePropertyName cloudVerified -NotePropertyValue $true -Force
         $local | Add-Member -NotePropertyName cloudGeneration -NotePropertyValue $record.generation -Force
@@ -114,6 +118,10 @@ try {
         Write-DevBox OK 'Cloud save published and read back; existing Save/Finish receipt contract satisfied.'
     }
 } catch {
+    # Static stage and exception type only: never emit raw exception messages.
+    $kind=$_.Exception.GetType().Name
+    if ($_.Exception.InnerException) { $kind=$_.Exception.InnerException.GetType().Name }
+    Write-DevBox WARN ("Cloud failure stage=$stage; type=$kind")
     Write-DevBox WARN 'Cloud operation failed; no cloud success claimed. Previous cloud generations are retained.'
     $global:LASTEXITCODE=2
     exit 2
