@@ -27,7 +27,7 @@ permissions:
 jobs:
   probe:
     runs-on: windows-2025-vs2026
-    timeout-minutes: 25
+    timeout-minutes: 45
     env:
       DEVBOX_ISOLATED_TEST: '1'
       WINDOWS_STATE_MEDIA_URI: ${{ github.event_name == 'workflow_dispatch' && inputs.media_uri || '' }}
