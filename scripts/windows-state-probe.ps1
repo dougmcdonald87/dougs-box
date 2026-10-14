@@ -209,6 +209,7 @@ function Install-WindowsStateHomeImage {
             . (Join-Path $PSScriptRoot 'windows-state-fixture.ps1')
             $answer=New-WindowsStateFixtureAnswerFile -Credential $GuestCredential
             $panther=Join-Path ($target+'Windows') 'Panther'
+            if(-not (Test-Path -LiteralPath $panther)){New-Item -ItemType Directory -Path $panther -ErrorAction Stop | Out-Null}
             if((Get-Item -LiteralPath $panther -ErrorAction Stop).Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Guest setup directory reparse point refused.'}
             [IO.File]::WriteAllText((Join-Path $panther 'unattend.xml'),$answer,[Text.UTF8Encoding]::new($false))
         }
