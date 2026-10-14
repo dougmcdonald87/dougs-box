@@ -1,0 +1,176 @@
+name: Windows Home persistence probe guards
+on:
+  pull_request:
+    paths:
+      - 'scripts/windows-state-probe.ps1'
+      - 'tests/windows-state-probe*'
+      - 'tests/windows-state-disk*'
+      - 'tests/windows-state-install*'
+      - 'tests/windows-state-guest*'
+      - 'scripts/windows-state-fixture.ps1'
+      - 'scripts/windows-state-capacity.ps1'
+      - 'scripts/windows_state_manifest.py'
+      - 'scripts/windows_state_transfer.py'
+      - 'scripts/windows-state-roundtrip.ps1'
+      - 'tests/windows-state-roundtrip.tests.ps1'
+      - 'tests/windows-state-package.native.ps1'
+      - 'tests/windows-state-transfer.tests.py'
+      - 'scripts/windows-state-checkpoint.ps1'
+      - 'tests/windows-state-checkpoint*'
+      - 'tests/windows-state-capacity*'
+      - 'tests/reserved-variable.tests.ps1'
+      - '.github/workflows/windows-state-probe-validate.yml'
+  workflow_dispatch:
+    inputs:
+      transfer_phase:
+        description: 'Isolated native probe, encrypted whole Windows producer, or independently fresh restore'
+        type: choice
+        options: [probe, publish, restore, transport-probe]
+        default: probe
+      expected_generation:
+        description: 'Exact previously accepted CI generation; required only for fresh restore'
+        type: string
+        default: ''
+      media_uri:
+        description: 'Optional owner-selected official Microsoft ISO URL for native media verification'
+        type: string
+        default: ''
+      media_sha256:
+        description: 'Microsoft published ISO SHA256'
+        type: string
+        default: ''
+      install_image:
+        description: 'Apply verified Home to only the owned disposable VHDX and test initial boot'
+        type: boolean
+        default: false
+      fixture:
+        description: 'Complete isolated local account setup and test actual program/document/settings across two boots'
+        type: boolean
+        default: false
+      checkpoint_roundtrip:
+        description: 'Test running production Save and clean Finish exports, same-ID local imports and point-in-time fixtures'
+        type: boolean
+        default: false
+      vss_attack:
+        description: 'Require native Save refusal with guest VSS disabled and preservation of prior export'
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  probe:
+    if: github.event_name != 'workflow_dispatch' || inputs.transfer_phase == 'probe'
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 45
+    env:
+      DEVBOX_ISOLATED_TEST: '1'
+      WINDOWS_STATE_MEDIA_URI: ${{ github.event_name == 'workflow_dispatch' && inputs.media_uri || '' }}
+      WINDOWS_STATE_MEDIA_SHA256: ${{ github.event_name == 'workflow_dispatch' && inputs.media_sha256 || '' }}
+      WINDOWS_STATE_INSTALL_IMAGE: ${{ github.event_name == 'workflow_dispatch' && inputs.install_image || false }}
+      WINDOWS_STATE_FIXTURE: ${{ github.event_name == 'workflow_dispatch' && inputs.fixture || false }}
+      WINDOWS_STATE_VSS_ATTACK: ${{ github.event_name == 'workflow_dispatch' && inputs.vss_attack || false }}
+      WINDOWS_STATE_CHECKPOINT_ROUNDTRIP: ${{ github.event_name == 'workflow_dispatch' && inputs.checkpoint_roundtrip || false }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - name: Refuse reserved PowerShell HOME assignments
+        shell: pwsh
+        run: ./tests/reserved-variable.tests.ps1
+      - name: Test ownership refusals and Windows Home hardware policy
+        shell: pwsh
+        run: ./tests/windows-state-probe.tests.ps1
+      - name: Test guest disk ownership and refusal boundaries
+        shell: pwsh
+        run: ./tests/windows-state-disk.tests.ps1
+      - name: Refuse host and existing disks before Windows installation
+        shell: pwsh
+        run: ./tests/windows-state-install.tests.ps1
+      - name: Refuse forged host sessions before guest fixture writes
+        shell: pwsh
+        run: ./tests/windows-state-guest.tests.ps1
+      - name: Refuse foreign whole-guest capacity export roots
+        shell: pwsh
+        run: ./tests/windows-state-capacity.tests.ps1
+      - name: Verify whole VM corruption identity parent and consistency refusals
+        shell: pwsh
+        run: python ./tests/windows-state-checkpoint.tests.py
+      - name: Refuse writes and wrong generations during fresh-host recovery
+        shell: pwsh
+        run: python ./tests/windows-state-transfer.tests.py
+      - name: Verify portable isolated fixture credential boundaries
+        shell: pwsh
+        run: ./tests/windows-state-roundtrip.tests.ps1
+      - name: Verify real small-file encrypted package canary and durable receipt
+        shell: pwsh
+        run: ./tests/windows-state-package.native.ps1
+      - name: Refuse foreign whole VM checkpoint roots
+        shell: pwsh
+        run: ./tests/windows-state-checkpoint.tests.ps1
+      - name: Start and remove only the owned empty VM on disposable Windows
+        shell: pwsh
+        run: ./tests/windows-state-probe.native.ps1
+
+  publish:
+    if: github.event_name == 'workflow_dispatch' && inputs.transfer_phase == 'publish'
+    runs-on: windows-2025-vs2026
+    environment: devbox
+    permissions:
+      contents: write
+    timeout-minutes: 60
+    env:
+      DEVBOX_ISOLATED_TEST: '1'
+      GH_TOKEN: ${{ github.token }}
+      RESTIC_PASSWORD: ${{ secrets.RESTIC_PASSWORD }}
+      WINDOWS_STATE_TRANSFER_MODE: publish
+      WINDOWS_STATE_MEDIA_URI: ${{ inputs.media_uri }}
+      WINDOWS_STATE_MEDIA_SHA256: ${{ inputs.media_sha256 }}
+      WINDOWS_STATE_INSTALL_IMAGE: 'true'
+      WINDOWS_STATE_FIXTURE: 'true'
+      WINDOWS_STATE_CHECKPOINT_ROUNDTRIP: 'true'
+      WINDOWS_STATE_VSS_ATTACK: 'true'
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - name: Verify actual Windows Save and Finish recovery then publish encrypted checkpoint
+        shell: pwsh
+        run: ./tests/windows-state-probe.native.ps1
+  restore:
+    if: github.event_name == 'workflow_dispatch' && inputs.transfer_phase == 'restore'
+    runs-on: windows-2025-vs2026
+    environment: devbox
+    timeout-minutes: 45
+    env:
+      DEVBOX_ISOLATED_TEST: '1'
+      GH_TOKEN: ${{ github.token }}
+      RESTIC_PASSWORD: ${{ secrets.RESTIC_PASSWORD }}
+      EXPECTED_WINDOWS_STATE_GENERATION: ${{ inputs.expected_generation }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - name: Restore exact checkpoint on independently fresh host and execute real acceptance fixture
+        shell: pwsh
+        run: |
+          . ./scripts/windows-state-roundtrip.ps1
+          $result=Restore-WindowsStateRoundtrip -ExpectedGeneration $env:EXPECTED_WINDOWS_STATE_GENERATION
+          Write-Output ('NATIVE INDEPENDENT FRESH HOST WINDOWS RESTORE: '+($result|ConvertTo-Json -Depth 5 -Compress))
+
+  transport-probe:
+    if: github.event_name == 'workflow_dispatch' && inputs.transfer_phase == 'transport-probe'
+    runs-on: windows-2025-vs2026
+    environment: devbox
+    permissions:
+      contents: write
+    timeout-minutes: 5
+    env:
+      DEVBOX_ISOLATED_TEST: '1'
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - name: Reproduce draft creation and tiny readback with safe transport diagnostics
+        shell: pwsh
+        run: python ./tests/windows-state-transport.native.py
