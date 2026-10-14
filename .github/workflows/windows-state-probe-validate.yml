@@ -10,6 +10,7 @@ on:
       - 'scripts/windows-state-fixture.ps1'
       - 'scripts/windows-state-capacity.ps1'
       - 'scripts/windows_state_manifest.py'
+      - 'scripts/windows-state-checkpoint.ps1'
       - 'tests/windows-state-checkpoint*'
       - 'tests/windows-state-capacity*'
       - 'tests/reserved-variable.tests.ps1'
@@ -69,6 +70,9 @@ jobs:
       - name: Verify whole VM corruption identity parent and consistency refusals
         shell: pwsh
         run: python ./tests/windows-state-checkpoint.tests.py
+      - name: Refuse foreign whole VM checkpoint roots
+        shell: pwsh
+        run: ./tests/windows-state-checkpoint.tests.ps1
       - name: Start and remove only the owned empty VM on disposable Windows
         shell: pwsh
         run: ./tests/windows-state-probe.native.ps1
