@@ -63,3 +63,29 @@ def validate_transfer_record(value,expected_generation,current_host,current_run)
     if not isinstance(prefs,dict) or set(prefs)!={'theme','volume'} or prefs['theme'] not in ('light','dark') or type(prefs['volume']) is not int or not 0<=prefs['volume']<=100:
         raise CheckpointError('Invalid fixture application preferences')
     return value
+
+if __name__=='__main__':
+    import argparse,json
+    from pathlib import Path
+    from cloud_checkpoint import fetch_latest,crypto_verify
+    parser=argparse.ArgumentParser()
+    parser.add_argument('operation',choices=['fetch','verify-record'])
+    parser.add_argument('--generation',required=True)
+    parser.add_argument('--archive');parser.add_argument('--restic-exe')
+    parser.add_argument('--record');parser.add_argument('--host');parser.add_argument('--run')
+    args=parser.parse_args()
+    try:
+        if args.operation=='fetch':
+            if not args.archive or not args.restic_exe:raise CheckpointError('Recovery archive and Restic required')
+            remote=ExactGenerationReader(os.environ.get('GITHUB_REPOSITORY',''),args.generation)
+            value=fetch_latest(remote,args.archive,verify=lambda path,record:crypto_verify(path,args.restic_exe,record))
+            if value['generation']!=args.generation:raise CheckpointError('Accepted recovery generation mismatch')
+        else:
+            if not args.record or not args.host or not args.run:raise CheckpointError('Recovery record and current host/run required')
+            path=Path(args.record)
+            if path.is_symlink() or not 0<path.stat().st_size<=1024**2:raise CheckpointError('Invalid transfer record file/size')
+            value=validate_transfer_record(json.loads(path.read_text(encoding='utf-8-sig')),args.generation,args.host,args.run)
+        print(json.dumps(value,separators=(',',':')))
+    except Exception as error:
+        detail=str(error) if isinstance(error,CheckpointError) else type(error).__name__
+        parser.exit(2,'Windows state transfer refused ('+detail+'); no restore success claimed.\n')

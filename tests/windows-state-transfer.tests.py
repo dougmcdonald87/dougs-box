@@ -1,4 +1,4 @@
-import copy,importlib.util,os,pathlib,sys,unittest
+import copy,importlib.util,json,os,pathlib,subprocess,sys,tempfile,unittest
 from unittest.mock import patch
 SOURCE=pathlib.Path(__file__).resolve().parents[1]/'scripts/windows_state_transfer.py'
 sys.path.insert(0,str(SOURCE.parent))
@@ -13,6 +13,17 @@ class ExactGenerationReaderTests(unittest.TestCase):
   self.env=patch.dict(os.environ,{'GITHUB_REPOSITORY':'owner/repo','GH_TOKEN':'fixture-token','DEVBOX_ISOLATED_TEST':'1','GITHUB_EVENT_NAME':'workflow_dispatch','GITHUB_RUN_ID':'456'},clear=True)
   self.env.start();self.addCleanup(self.env.stop)
  def reader(self,tag=TAG,repository='owner/repo'):return module.ExactGenerationReader(repository,tag)
+ def test_cli_refuses_production_fetch_before_network(self):
+  result=subprocess.run([sys.executable,str(SOURCE),'fetch','--generation',TAG.replace('ci-123-1','production'),'--archive','unused.zip','--restic-exe','unavailable'],capture_output=True,text=True)
+  self.assertNotEqual(result.returncode,0,'CLI must refuse a production recovery request')
+ def test_cli_validates_record(self):
+  with tempfile.TemporaryDirectory() as directory:
+   record=pathlib.Path(directory)/'record.json';record.write_text(json.dumps(self.record()))
+   result=subprocess.run([sys.executable,str(SOURCE),'verify-record','--generation',TAG,'--record',str(record),'--host','44444444-4444-4444-8444-444444444444','--run','456'],capture_output=True,text=True)
+   accepted=False
+   try:accepted=result.returncode==0 and json.loads(result.stdout)==self.record()
+   except ValueError:pass
+   self.assertTrue(accepted,'CLI must return the validated exact transfer record')
  def record(self):
   return {'schema':1,'producer_run':'123','producer_attempt':'1','producer_host':'11111111-1111-4111-8111-111111111111','source_sha':'a'*40,'vm_id':'22222222-2222-4222-8222-222222222222','vm_name':'DevBoxWindowsState-123-1','root':'E:/DevBox/Tools/WindowsStateProbe/probe-123-1','generation':'finish-'+'b'*32,'manifest_sha256':'c'*64,'baseline':{'machineName':'DESKTOP-FIXTURE','machineGuid':'33333333-3333-4333-8333-333333333333','programPath':r'C:\DevBoxFixture\Python312\python.exe','programVersion':'Python 3.12.10','documentSha256':'D'*64,'preferences':{'theme':'light','volume':84},'windowsHideFileExt':1}}
  def validate(self,record,host='44444444-4444-4444-8444-444444444444',run='456'):

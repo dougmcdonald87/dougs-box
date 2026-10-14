@@ -1,3 +1,13 @@
+# Current Task4 wiring — 14October2026 22:54BST
+
+Actual full Windows local SaveA and FinishB restore run38626065555/job116065415923 PASSED. Both preserve VM13c1fcd9-31d7-4836-8774-076f365de699, Python3.12.10, point-in-time document/preferences/HKCU/machine identity. Save restored originaldark42/Hide0/doc37414..., Finish restoredlaterlight84/Hide1/doc280D... . Full source verified before owned source unregister; no clone/newGUID. Same outerhost only, freshhostunproved. Portablecredential native test38627404258/job116069950419 PASS.
+
+Task4 now wired but nativeGREEN/packageproducer/consumer notexecuted yet: scripts/windows-state-roundtrip.ps1 publishes only immutable ownedOffFinish, Resticwholebackup/read-data/canaryrestore/receipt, existing8GiBboundedencryptedReleasestransport/readback; no productionchannel. Consumer exactgeneration adapter read-only, producercompleted/samecodeSHA beforedownload, distinctouterUUID/runID, authenticatedmetadata/hash/nativeparents/config/IDbeforeImport, deriveddisposablefixturecredential,actual program/doc/prefs/HKCU/machinechecksafterboot. Workflowmanualtransfer_phase probe(default)/publish/restore. PublishenvironmentdevboxexistingRESTIC_PASSWORD/contentswrite;restorecontentsread/noautochaining. No currentfullISOjobactive. Previous newpublisher presence RED38643235989/job116123703562 ASSERT whole-VM encrypted publisher missing observed; CLI2positive/negative tests RED -> all15transfer+20cloud+20manifestunitGREEN. Need observe currentnativeguard+ValidateGREENbeforeactualpublish.
+
+Next dispatch exactlyone publish with valid officialWin10URI/hash; it rebuildsactualfixtureusingportablecredential,requiresrealA/Broundtrip and disabledvmicvss failure challenge beforepublication. Inspect native VSSfailure actualerrorID; no unrelated failurecounts. Preserveprevious acceptedexport fullinventory. If successread exactgeneration fromcompletedlogs,inventoryproducerended,then manuallydispatchrestoreonSAMErevision with exactexpected_generation. No freshrestorebootclaimbeforeactualfixturepass. Onefinalindependentwholebranchreview aftertasks. Main/D/Lenovo untouched,zeroadditionalspending. Update same ZIP everycompletedstage.
+
+# Historical handoff below (overridden by latest section)
+
 # Current persistence handoff — 2026-10-14
 Last verified ZIP: dev-box-hand-over.zip version127, Library ID libfile_52c1a755c190819186ba037ced7d0f73.
 Local workspace exec server is disconnected (409 environment_offline); ZIP cannot currently be rebuilt. Do not claim ZIP128 exists. These changes are durably saved on candidate GitHub branch.

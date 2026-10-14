@@ -21,6 +21,15 @@ on:
       - '.github/workflows/windows-state-probe-validate.yml'
   workflow_dispatch:
     inputs:
+      transfer_phase:
+        description: 'Isolated native probe, encrypted whole Windows producer, or independently fresh restore'
+        type: choice
+        options: [probe, publish, restore]
+        default: probe
+      expected_generation:
+        description: 'Exact previously accepted CI generation; required only for fresh restore'
+        type: string
+        default: ''
       media_uri:
         description: 'Optional owner-selected official Microsoft ISO URL for native media verification'
         type: string
@@ -49,6 +58,7 @@ permissions:
   contents: read
 jobs:
   probe:
+    if: github.event_name != 'workflow_dispatch' || inputs.transfer_phase == 'probe'
     runs-on: windows-2025-vs2026
     timeout-minutes: 45
     env:
@@ -96,3 +106,49 @@ jobs:
       - name: Start and remove only the owned empty VM on disposable Windows
         shell: pwsh
         run: ./tests/windows-state-probe.native.ps1
+
+  publish:
+    if: github.event_name == 'workflow_dispatch' && inputs.transfer_phase == 'publish'
+    runs-on: windows-2025-vs2026
+    environment: devbox
+    permissions:
+      contents: write
+    timeout-minutes: 60
+    env:
+      DEVBOX_ISOLATED_TEST: '1'
+      GH_TOKEN: ${{ github.token }}
+      RESTIC_PASSWORD: ${{ secrets.RESTIC_PASSWORD }}
+      WINDOWS_STATE_TRANSFER_MODE: publish
+      WINDOWS_STATE_MEDIA_URI: ${{ inputs.media_uri }}
+      WINDOWS_STATE_MEDIA_SHA256: ${{ inputs.media_sha256 }}
+      WINDOWS_STATE_INSTALL_IMAGE: 'true'
+      WINDOWS_STATE_FIXTURE: 'true'
+      WINDOWS_STATE_CHECKPOINT_ROUNDTRIP: 'true'
+      WINDOWS_STATE_VSS_ATTACK: 'true'
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - name: Verify actual Windows Save and Finish recovery then publish encrypted checkpoint
+        shell: pwsh
+        run: ./tests/windows-state-probe.native.ps1
+  restore:
+    if: github.event_name == 'workflow_dispatch' && inputs.transfer_phase == 'restore'
+    runs-on: windows-2025-vs2026
+    environment: devbox
+    timeout-minutes: 45
+    env:
+      DEVBOX_ISOLATED_TEST: '1'
+      GH_TOKEN: ${{ github.token }}
+      RESTIC_PASSWORD: ${{ secrets.RESTIC_PASSWORD }}
+      EXPECTED_WINDOWS_STATE_GENERATION: ${{ inputs.expected_generation }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - name: Restore exact checkpoint on independently fresh host and execute real acceptance fixture
+        shell: pwsh
+        run: |
+          . ./scripts/windows-state-roundtrip.ps1
+          $result=Restore-WindowsStateRoundtrip -ExpectedGeneration $env:EXPECTED_WINDOWS_STATE_GENERATION
+          Write-Output ('NATIVE INDEPENDENT FRESH HOST WINDOWS RESTORE: '+($result|ConvertTo-Json -Depth 5 -Compress))

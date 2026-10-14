@@ -4,6 +4,7 @@ if($env:WINDOWS_STATE_INSTALL_IMAGE -eq 'true' -and -not $env:WINDOWS_STATE_MEDI
 if($env:WINDOWS_STATE_FIXTURE -eq 'true' -and $env:WINDOWS_STATE_INSTALL_IMAGE -ne 'true'){throw 'Native fixture test requires image installation.'}
 if($env:WINDOWS_STATE_CHECKPOINT_ROUNDTRIP -eq 'true' -and $env:WINDOWS_STATE_FIXTURE -ne 'true'){throw 'Native checkpoint roundtrip requires real guest fixture.'}
 if($env:WINDOWS_STATE_VSS_ATTACK -eq 'true' -and $env:WINDOWS_STATE_CHECKPOINT_ROUNDTRIP -ne 'true'){throw 'Native VSS attack requires a real checkpoint roundtrip.'}
+if($env:WINDOWS_STATE_TRANSFER_MODE -eq 'publish' -and ($env:WINDOWS_STATE_CHECKPOINT_ROUNDTRIP -ne 'true' -or $env:WINDOWS_STATE_VSS_ATTACK -ne 'true')){throw 'Publisher requires actual checkpoint roundtrip and VSS refusal challenge.'}
 . (Join-Path $PSScriptRoot '../scripts/windows-state-probe.ps1')
 & (Join-Path $PSScriptRoot '../scripts/bootstrap.ps1') -CloudCandidate
 if(-not $? -or -not (Test-Path 'E:/DevBox/Control/session.json')){throw 'Owned E bootstrap failed'}
@@ -94,9 +95,14 @@ try {
         if($env:WINDOWS_STATE_INSTALL_IMAGE -eq 'true'){
             $guestCredential=$null
             if($env:WINDOWS_STATE_FIXTURE -eq 'true'){
+                if($env:WINDOWS_STATE_TRANSFER_MODE -eq 'publish'){
+                    . (Join-Path $PSScriptRoot '../scripts/windows-state-roundtrip.ps1')
+                    $guestCredential=Get-WindowsStatePortableFixtureCredential -VmId $id
+                } else {
                 $secret='Fixture!1'+[Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(24))
                 Write-Host ('::add-mask::'+$secret)
                 $guestCredential=[pscredential]::new('DevBoxFixture',(ConvertTo-SecureString $secret -AsPlainText -Force))
+                }
             }
             $receipt=Install-WindowsStateHomeImage -Root $root -VmName $name -Sha256 $env:WINDOWS_STATE_MEDIA_SHA256 -GuestCredential $guestCredential
             Write-Output ('NATIVE HOME IMAGE APPLIED: '+($receipt|ConvertTo-Json -Compress))
@@ -244,6 +250,10 @@ try {
                         $owned=Get-WindowsStateCheckpointOwner -Root $root -VmId $id
                         Remove-VM -VM $owned.vm -Force -ErrorAction Stop
                     }
+                }
+                if($env:WINDOWS_STATE_TRANSFER_MODE -eq 'publish'){
+                    $published=Publish-WindowsStateRoundtrip -Root $root -VmId $id -Checkpoint $finished -Baseline $finishBaseline
+                    Write-Output ('NATIVE ENCRYPTED WHOLE WINDOWS PUBLISHED: '+($published|ConvertTo-Json -Compress))
                 }
             } else {
                 Stop-VM -VM (Get-VM -Id $id -ErrorAction Stop) -ErrorAction Stop
