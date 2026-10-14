@@ -140,7 +140,7 @@ function Test-WindowsStateInstallDiskPolicy {
         if(([string]$Facts.ExpectedPath).Replace('\','/') -ine $expected -or ([string]$Facts.ActualPath).Replace('\','/') -ine $expected){$reason='Installation disk path is not the owned VHDX.'}
         elseif($Facts.VhdType -cne 'Dynamic' -or $Facts.CapacityBytes -ne 64GB){$reason='Installation disk type/capacity mismatch.'}
         elseif(($Facts.DiskNumber -isnot [int] -and $Facts.DiskNumber -isnot [uint32]) -or $Facts.DiskNumber -le 0 -or $Facts.ResolvedDiskNumber -ne $Facts.DiskNumber){$reason='Installation disk number mismatch or host disk zero.'}
-        elseif($Facts.BusType -cne 'FileBackedVirtual' -or $Facts.PartitionStyle -cne 'RAW' -or $Facts.PartitionCount -ne 0){$reason='Installation requires an empty file-backed virtual disk.'}
+        elseif($Facts.BusType -cnotin @('FileBackedVirtual','File Backed Virtual') -or $Facts.PartitionStyle -cne 'RAW' -or $Facts.PartitionCount -ne 0){$reason='Installation requires an empty file-backed virtual disk.'}
         elseif($Facts.IsBoot -isnot [bool] -or $Facts.IsSystem -isnot [bool] -or $Facts.Mounted -isnot [bool] -or $Facts.IsBoot -or $Facts.IsSystem -or -not $Facts.Mounted){$reason='Host boot/system or unmounted disk refused.'}
         else {$number=$Facts.DiskNumber}
     }

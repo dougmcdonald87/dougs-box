@@ -25,6 +25,11 @@ RefusedInstall @{IsSystem='False'}
 $r=Test-WindowsStateInstallDiskPolicy -Root $root -Facts $facts
 if(-not $r.eligible -or $r.diskNumber -ne 7){throw 'Owned new virtual disk refused'}
 Write-Output 'INSTALLATION DISK POLICY: 14 host/existing-disk refusals and owned new virtual disk PASS'
+$nativeFacts=$facts.Clone()
+$nativeFacts.BusType='File Backed Virtual'
+$nativeResult=Test-WindowsStateInstallDiskPolicy -Root $root -Facts $nativeFacts
+if(-not $nativeResult.eligible){throw ('Native Get-Disk display value refused: '+$nativeResult.reason)}
+Write-Output 'ACTUAL WINDOWS GET-DISK FILE BACKED VIRTUAL VALUE: PASS'
 $temp=Join-Path ([IO.Path]::GetTempPath()) ('InstallGuard-'+[guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory $temp | Out-Null
 New-PSDrive -Name E -PSProvider FileSystem -Root $temp | Out-Null
