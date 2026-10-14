@@ -58,6 +58,7 @@ try {
     $emptyDisks=Join-Path $root 'empty-import-disks';$emptySnapshots=Join-Path $root 'empty-import-snapshots'
     $emptySourceDisks=Split-Path (Get-ChildItem -LiteralPath $identityExport -Recurse -File -Filter '*.vhdx'|Select-Object -First 1).FullName -Parent
     $emptyReport=Compare-VM -Path $configs[0].FullName -Copy -VhdSourcePath $emptySourceDisks -VirtualMachinePath (Join-Path $root $name) -VhdDestinationPath $emptyDisks -SnapshotFilePath $emptySnapshots -ErrorAction Stop
+    Write-Output ('NATIVE EMPTY PARSED COMPATIBILITY OBSERVATIONS: '+([pscustomobject]@{expectedVmId=$id.ToString();parsedVmId=$emptyReport.VM.Id.ToString();expectedName=$name;parsedName=$emptyReport.VM.Name;parsedVersion=$emptyReport.VM.Version.ToString();issues=@($emptyReport.Incompatibilities|Where-Object {$_}|ForEach-Object {[pscustomobject]@{messageId=$_.MessageId;message=$_.Message}})}|ConvertTo-Json -Depth 5 -Compress))
     if($emptyReport.VM.Id -ne $id -or $emptyReport.VM.Name -cne $name -or @($emptyReport.Incompatibilities|Where-Object {$_}).Count){throw 'Empty exported embedded VM identity/compatibility mismatch'}
     $emptyImported=Import-VM -CompatibilityReport $emptyReport -ErrorAction Stop
     if($emptyImported.Id -ne $id -or -not (Test-WindowsStateProbeVmPath -Root $root -VmName $name -VmPath $emptyImported.Path)){throw 'Actual empty import VM ID/path changed'}
