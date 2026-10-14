@@ -204,7 +204,14 @@ function Install-WindowsStateHomeImage {
         $target=([string]$windows.DriveLetter)+':\';$system=([string]$efi.DriveLetter)+':\'
         & dism.exe /English /Apply-Image ('/ImageFile:'+$wim) ('/Index:'+$detail.ImageIndex) ('/ApplyDir:'+$target) /CheckIntegrity | ForEach-Object {Write-Host $_}
         if($LASTEXITCODE -ne 0){throw ('Windows image application failed: '+$LASTEXITCODE)}
-        & bcdboot.exe ($target+'Windows') /s $system /f UEFI | ForEach-Object {Write-Host $_}
+        # Preserve the failing invocation; collect evidence before choosing a fix.
+        $bootTool=Get-Command bcdboot.exe -CommandType Application -ErrorAction Stop
+        Write-Host ('BOOT FILE DIAGNOSTIC: '+([pscustomobject]@{tool=$bootTool.Source;toolVersion=(Get-Item -LiteralPath $bootTool.Source).VersionInfo.FileVersion;windowsPath=($target+'Windows');efiPath=$system;diskNumber=$policy.diskNumber;efiPartition=$efi.PartitionNumber;windowsPartition=$windows.PartitionNumber;efiFileSystem=(Get-Volume -Partition $efi -ErrorAction Stop).FileSystem;efiFreeBytes=(Get-Volume -Partition $efi -ErrorAction Stop).SizeRemaining}|ConvertTo-Json -Compress))
+        foreach($relative in @('System32\Config\BCD-Template','Boot\EFI\bootmgfw.efi','System32\winload.efi')){
+            $bootSource=Join-Path ($target+'Windows') $relative
+            Write-Host ('BOOT SOURCE DIAGNOSTIC: '+([pscustomobject]@{relative=$relative;exists=(Test-Path -LiteralPath $bootSource);bytes=if(Test-Path -LiteralPath $bootSource){(Get-Item -LiteralPath $bootSource).Length}else{$null}}|ConvertTo-Json -Compress))
+        }
+        & bcdboot.exe ($target+'Windows') /s $system /f UEFI /v | ForEach-Object {Write-Host $_}
         if($LASTEXITCODE -ne 0){throw ('Guest boot-file creation failed: '+$LASTEXITCODE)}
         if(-not (Test-Path -LiteralPath ($target+'Windows\System32\ntoskrnl.exe')) -or -not (Test-Path -LiteralPath ($system+'EFI\Microsoft\Boot\BCD'))){throw 'Applied guest Windows or EFI boot files missing.'}
         Set-VMFirmware -VM $vm -FirstBootDevice $drives[0] -ErrorAction Stop
