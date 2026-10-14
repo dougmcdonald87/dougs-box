@@ -25,7 +25,7 @@ on:
       transfer_phase:
         description: 'Isolated native probe, encrypted whole Windows producer, or independently fresh restore'
         type: choice
-        options: [probe, publish, restore]
+        options: [probe, publish, restore, transport-probe]
         default: probe
       expected_generation:
         description: 'Exact previously accepted CI generation; required only for fresh restore'
@@ -156,3 +156,21 @@ jobs:
           . ./scripts/windows-state-roundtrip.ps1
           $result=Restore-WindowsStateRoundtrip -ExpectedGeneration $env:EXPECTED_WINDOWS_STATE_GENERATION
           Write-Output ('NATIVE INDEPENDENT FRESH HOST WINDOWS RESTORE: '+($result|ConvertTo-Json -Depth 5 -Compress))
+
+  transport-probe:
+    if: github.event_name == 'workflow_dispatch' && inputs.transfer_phase == 'transport-probe'
+    runs-on: windows-2025-vs2026
+    environment: devbox
+    permissions:
+      contents: write
+    timeout-minutes: 5
+    env:
+      DEVBOX_ISOLATED_TEST: '1'
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - name: Reproduce draft creation and tiny readback with safe transport diagnostics
+        shell: pwsh
+        run: python ./tests/windows-state-transport.native.py
