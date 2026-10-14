@@ -10,6 +10,8 @@ on:
       - 'scripts/windows-state-fixture.ps1'
       - 'scripts/windows-state-capacity.ps1'
       - 'scripts/windows_state_manifest.py'
+      - 'scripts/windows_state_transfer.py'
+      - 'tests/windows-state-transfer.tests.py'
       - 'scripts/windows-state-checkpoint.ps1'
       - 'tests/windows-state-checkpoint*'
       - 'tests/windows-state-capacity*'
@@ -75,6 +77,9 @@ jobs:
       - name: Verify whole VM corruption identity parent and consistency refusals
         shell: pwsh
         run: python ./tests/windows-state-checkpoint.tests.py
+      - name: Refuse writes and wrong generations during fresh-host recovery
+        shell: pwsh
+        run: python ./tests/windows-state-transfer.tests.py
       - name: Refuse foreign whole VM checkpoint roots
         shell: pwsh
         run: ./tests/windows-state-checkpoint.tests.ps1
