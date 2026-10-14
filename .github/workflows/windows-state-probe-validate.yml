@@ -8,6 +8,8 @@ on:
       - 'tests/windows-state-install*'
       - 'tests/windows-state-guest*'
       - 'scripts/windows-state-fixture.ps1'
+      - 'scripts/windows-state-capacity.ps1'
+      - 'tests/windows-state-capacity*'
       - 'tests/reserved-variable.tests.ps1'
       - '.github/workflows/windows-state-probe-validate.yml'
   workflow_dispatch:
@@ -59,6 +61,9 @@ jobs:
       - name: Refuse forged host sessions before guest fixture writes
         shell: pwsh
         run: ./tests/windows-state-guest.tests.ps1
+      - name: Refuse foreign whole-guest capacity export roots
+        shell: pwsh
+        run: ./tests/windows-state-capacity.tests.ps1
       - name: Start and remove only the owned empty VM on disposable Windows
         shell: pwsh
         run: ./tests/windows-state-probe.native.ps1
