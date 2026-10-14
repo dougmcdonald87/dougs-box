@@ -84,7 +84,7 @@ def _structure(value,expected_vm_id,supported_versions):
     configs=[f for f in files.values() if f['path'].lower().endswith('.vmcx')]
     if len(configs)!=1 or config.casefold() not in files or configs[0]['path'].casefold()!=config.casefold():
         raise ManifestError('Exactly one exported VM configuration required')
-    if Path(config).stem.lower()!=value['vm_id'].lower():raise ManifestError('Configuration file VM identity mismatch')
+    # Checkpoint filenames contain checkpoint IDs. Native Compare-VM binds the embedded VM ID.
     disks=value['disks']
     if not isinstance(disks,list) or not disks:raise ManifestError('Export disks missing')
     graph={}

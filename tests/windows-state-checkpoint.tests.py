@@ -21,6 +21,14 @@ class CheckpointManifestTests(unittest.TestCase):
     def verify(self,value):return module.validate_manifest(self.root,value,self.id,['12.0'])
     def test_whole_inventory_and_identity_pass(self):
         m=self.manifest();self.verify(m);self.assertEqual({x['path'] for x in m['files']},{self.config,self.disk})
+    def test_snapshot_filename_is_not_vm_identity(self):
+        original=self.root/self.config
+        alternate='Virtual Machines/'+str(uuid.uuid4())+'.vmcx'
+        original.rename(self.root/alternate);self.config=alternate
+        accepted=True
+        try:self.verify(self.manifest())
+        except module.ManifestError:accepted=False
+        self.assertTrue(accepted,'A checkpoint filename may differ from its embedded VM identity')
     def test_running_finish_refused(self):
         with self.assertRaises(module.ManifestError):module.consistency_policy('finish','Running',shutdown_verified=True)
     def test_unclean_off_finish_refused(self):

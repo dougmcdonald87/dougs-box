@@ -44,7 +44,6 @@ try {
         if($configs.Count -ne 1){throw 'Empty checkpoint export configuration ambiguous'}
         $configurationId=[guid]::Parse($configs[0].BaseName)
         Write-Output ('NATIVE EMPTY CHECKPOINT CONFIGURATION FILENAME: '+([pscustomobject]@{sourceVmId=$id.ToString();checkpointId=$identitySnapshot.Id.ToString();configurationFile=$configs[0].Name;configurationId=$configurationId.ToString();evidence='filename-only; actual same-ID import requires source unregistered'}|ConvertTo-Json -Compress))
-        if($configurationId -ne $id){throw 'Empty checkpoint exported configuration filename does not preserve VM identity'}
     } finally {
         if($identitySnapshot){Remove-VMSnapshot -VMSnapshot $identitySnapshot -Confirm:$false -ErrorAction Stop}
         Set-VM -VM (Get-VM -Id $id) -CheckpointType $priorCheckpointType -ErrorAction Stop
@@ -52,6 +51,24 @@ try {
     $mergeDeadline=[DateTime]::UtcNow.AddMinutes(1)
     while([IO.Path]::GetFullPath((Get-VMHardDiskDrive -VM (Get-VM -Id $id))[0].Path) -ine [IO.Path]::GetFullPath($disk.diskPath) -and [DateTime]::UtcNow -lt $mergeDeadline){Start-Sleep -Seconds 2}
     if([IO.Path]::GetFullPath((Get-VMHardDiskDrive -VM (Get-VM -Id $id))[0].Path) -ine [IO.Path]::GetFullPath($disk.diskPath)){throw 'Owned empty identity checkpoint merge did not finish'}
+    # Actual empty same-ID import after positively owned source unregister.
+    $ownedEmpty=Get-VM -Id $id -ErrorAction Stop
+    if($ownedEmpty.Name -cne $name -or $ownedEmpty.State -ne 'Off' -or -not (Test-WindowsStateProbeVmPath -Root $root -VmName $name -VmPath $ownedEmpty.Path)){throw 'Empty import source owner mismatch'}
+    Remove-VM -VM $ownedEmpty -Force -ErrorAction Stop
+    $emptyDisks=Join-Path $root 'empty-import-disks';$emptySnapshots=Join-Path $root 'empty-import-snapshots'
+    $emptySourceDisks=Split-Path (Get-ChildItem -LiteralPath $identityExport -Recurse -File -Filter '*.vhdx'|Select-Object -First 1).FullName -Parent
+    $emptyReport=Compare-VM -Path $configs[0].FullName -Copy -VhdSourcePath $emptySourceDisks -VirtualMachinePath (Join-Path $root $name) -VhdDestinationPath $emptyDisks -SnapshotFilePath $emptySnapshots -ErrorAction Stop
+    if($emptyReport.VM.Id -ne $id -or $emptyReport.VM.Name -cne $name -or @($emptyReport.Incompatibilities|Where-Object {$_}).Count){throw 'Empty exported embedded VM identity/compatibility mismatch'}
+    $emptyImported=Import-VM -CompatibilityReport $emptyReport -ErrorAction Stop
+    if($emptyImported.Id -ne $id -or -not (Test-WindowsStateProbeVmPath -Root $root -VmName $name -VmPath $emptyImported.Path)){throw 'Actual empty import VM ID/path changed'}
+    Write-Output ('NATIVE EMPTY ACTUAL SAME-ID COPY IMPORT: '+([pscustomobject]@{sourceVmId=$id.ToString();configurationFilenameId=$configurationId.ToString();parsedVmId=$emptyReport.VM.Id.ToString();importedVmId=$emptyImported.Id.ToString();vmPath=$emptyImported.Path}|ConvertTo-Json -Compress))
+    # Restore the original owned RAW test disk required by the installation guard.
+    foreach($attached in @(Get-VMHardDiskDrive -VM $emptyImported)){
+        if(-not [IO.Path]::GetFullPath($attached.Path).StartsWith([IO.Path]::GetFullPath($emptyDisks)+'\',[StringComparison]::OrdinalIgnoreCase)){throw 'Empty imported attachment outside owned import directory'}
+        Remove-VMHardDiskDrive -VMHardDiskDrive $attached -ErrorAction Stop
+    }
+    Add-VMHardDiskDrive -VM $emptyImported -ControllerType SCSI -ControllerNumber 0 -ControllerLocation 0 -Path $disk.diskPath -ErrorAction Stop
+    Set-VM -VM $emptyImported -CheckpointType $priorCheckpointType -ErrorAction Stop
     if($env:WINDOWS_STATE_MEDIA_URI){
         . (Join-Path $PSScriptRoot '../scripts/windows-home-media.ps1')
         $media=Get-WindowsHomeMedia -Root $root -VmName $name -Uri $env:WINDOWS_STATE_MEDIA_URI -Sha256 $env:WINDOWS_STATE_MEDIA_SHA256
