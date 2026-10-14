@@ -41,8 +41,9 @@ try {
         Export-VMSnapshot -VMSnapshot $identitySnapshot -Path $identityExport -ErrorAction Stop | Out-Null
         $configs=@(Get-ChildItem -LiteralPath $identityExport -Recurse -File -Filter '*.vmcx')
         if($configs.Count -ne 1){throw 'Empty checkpoint export configuration ambiguous'}
-        $identityReport=Compare-VM -Path $configs[0].FullName -Copy -ErrorAction Stop
-        Write-Output ('NATIVE EMPTY CHECKPOINT EXPORT IDENTITY: '+([pscustomobject]@{sourceVmId=$id.ToString();checkpointId=$identitySnapshot.Id.ToString();configurationFile=$configs[0].Name;exportedVmId=$identityReport.VM.Id.ToString();exportedVmName=$identityReport.VM.Name}|ConvertTo-Json -Compress))
+        $configurationId=[guid]::Parse($configs[0].BaseName)
+        Write-Output ('NATIVE EMPTY CHECKPOINT CONFIGURATION FILENAME: '+([pscustomobject]@{sourceVmId=$id.ToString();checkpointId=$identitySnapshot.Id.ToString();configurationFile=$configs[0].Name;configurationId=$configurationId.ToString();evidence='filename-only; actual same-ID import requires source unregistered'}|ConvertTo-Json -Compress))
+        if($configurationId -ne $id){throw 'Empty checkpoint exported configuration filename does not preserve VM identity'}
     } finally {
         if($identitySnapshot){Remove-VMSnapshot -VMSnapshot $identitySnapshot -Confirm:$false -ErrorAction Stop}
         Set-VM -VM (Get-VM -Id $id) -CheckpointType $priorCheckpointType -ErrorAction Stop

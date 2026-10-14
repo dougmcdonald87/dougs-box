@@ -107,7 +107,7 @@ function Export-WindowsStateCheckpoint {
         $metadata | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $metadataPath -Encoding utf8
         & python (Join-Path $PSScriptRoot 'windows_state_manifest.py') create --root $payload --metadata $metadataPath --manifest $manifest | ForEach-Object {Write-Host $_}
         if($LASTEXITCODE -ne 0){throw 'Whole checkpoint manifest verification failed; no accepted receipt.'}
-        [pscustomobject]@{vmId=$VmId.ToString();mode=$Mode;generation=$generation;exportPath=$payload;manifestPath=$manifest;verified=$true;published=$false}
+        [pscustomobject]@{vmId=$VmId.ToString();mode=$Mode;generation=$generation;exportPath=$payload;manifestPath=$manifest;exportVerified=$true;published=$false}
     } finally {
         if($snapshot){Remove-VMSnapshot -VMSnapshot $snapshot -Confirm:$false -ErrorAction Stop}
         Set-VM -VM (Get-VM -Id $VmId) -CheckpointType $oldType -ErrorAction Stop
