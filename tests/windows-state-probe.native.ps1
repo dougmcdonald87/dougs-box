@@ -3,6 +3,7 @@ if($env:GITHUB_ACTIONS -ne 'true' -or $env:DEVBOX_ISOLATED_TEST -ne '1'){throw '
 if($env:WINDOWS_STATE_INSTALL_IMAGE -eq 'true' -and -not $env:WINDOWS_STATE_MEDIA_URI){throw 'Native image test requires an explicit official media URI.'}
 if($env:WINDOWS_STATE_FIXTURE -eq 'true' -and $env:WINDOWS_STATE_INSTALL_IMAGE -ne 'true'){throw 'Native fixture test requires image installation.'}
 if($env:WINDOWS_STATE_CHECKPOINT_ROUNDTRIP -eq 'true' -and $env:WINDOWS_STATE_FIXTURE -ne 'true'){throw 'Native checkpoint roundtrip requires real guest fixture.'}
+if($env:WINDOWS_STATE_VSS_ATTACK -eq 'true' -and $env:WINDOWS_STATE_CHECKPOINT_ROUNDTRIP -ne 'true'){throw 'Native VSS attack requires a real checkpoint roundtrip.'}
 . (Join-Path $PSScriptRoot '../scripts/windows-state-probe.ps1')
 & (Join-Path $PSScriptRoot '../scripts/bootstrap.ps1') -CloudCandidate
 if(-not $? -or -not (Test-Path 'E:/DevBox/Control/session.json')){throw 'Owned E bootstrap failed'}
@@ -163,6 +164,44 @@ try {
                 }
                 $saved=Export-WindowsStateCheckpoint -Root $root -VmId $id -Mode save
                 Write-Output ('NATIVE RUNNING PRODUCTION SAVE EXPORTED: '+($saved|ConvertTo-Json -Compress))
+                if($env:WINDOWS_STATE_VSS_ATTACK -eq 'true'){
+                    # Attack the native consistency mechanism only inside this owned guest.
+                    $session=Open-CheckpointFixtureSession
+                    $serviceBefore=$null
+                    try {
+                        $serviceBefore=Invoke-Command -Session $session -ErrorAction Stop -ScriptBlock {
+                            $service=Get-Service vmicvss -ErrorAction Stop
+                            [pscustomobject]@{startType=$service.StartType.ToString();status=$service.Status.ToString()}
+                        }
+                        Invoke-Command -Session $session -ErrorAction Stop -ScriptBlock {
+                            Stop-Service vmicvss -Force -ErrorAction Stop
+                            Set-Service vmicvss -StartupType Disabled -ErrorAction Stop
+                            if((Get-Service vmicvss).Status -ne 'Stopped' -or (Get-Service vmicvss).StartType -ne 'Disabled'){throw 'Guest consistency attack did not take effect'}
+                        }
+                        $nativeFailure=$null
+                        try {$unexpected=Export-WindowsStateCheckpoint -Root $root -VmId $id -Mode save}
+                        catch {$nativeFailure=$_}
+                        if(-not $nativeFailure){throw 'Save accepted disabled guest VSS; data-consistency claim falsified'}
+                        if($nativeFailure.FullyQualifiedErrorId -notmatch 'ExportVM'){throw ('Consistency attack failed for unrelated cause: '+$nativeFailure.FullyQualifiedErrorId)}
+                        Write-Output ('NATIVE DISABLED GUEST VSS SAVE REFUSED BY EXPORT: '+$nativeFailure.FullyQualifiedErrorId)
+                    } finally {
+                        if($serviceBefore){
+                            Invoke-Command -Session $session -ArgumentList $serviceBefore.startType,$serviceBefore.status -ErrorAction Stop -ScriptBlock {
+                                param($startType,$status)
+                                Set-Service vmicvss -StartupType $startType -ErrorAction Stop
+                                if($status -eq 'Running'){Start-Service vmicvss -ErrorAction Stop}else{Stop-Service vmicvss -Force -ErrorAction Stop}
+                            }
+                        }
+                        Remove-PSSession $session
+                    }
+                    $proofPath=Join-Path (Split-Path $saved.manifestPath -Parent) 'vss-refusal-verification.json'
+                    @{vm_id=$id.ToString();supported_versions=@(Get-VMHostSupportedVersion|ForEach-Object {$_.Version.ToString()})}|ConvertTo-Json -Depth 5|Set-Content -LiteralPath $proofPath -Encoding utf8
+                    try {
+                        & python (Join-Path $PSScriptRoot '../scripts/windows_state_manifest.py') verify --root $saved.exportPath --metadata $proofPath --manifest $saved.manifestPath | ForEach-Object {Write-Host $_}
+                        if($LASTEXITCODE -ne 0){throw 'Failed VSS Save altered the preceding accepted checkpoint'}
+                        Write-Output 'NATIVE FAILED SAVE PRESERVED PREVIOUS COMPLETE IMMUTABLE EXPORT: PASS'
+                    } finally {Remove-Item -LiteralPath $proofPath -Force}
+                }
                 # Change the source after Save: importing Save must recover the prior values.
                 $session=Open-CheckpointFixtureSession
                 try {

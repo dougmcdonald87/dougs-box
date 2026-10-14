@@ -39,6 +39,10 @@ on:
         description: 'Test running production Save and clean Finish exports, same-ID local imports and point-in-time fixtures'
         type: boolean
         default: false
+      vss_attack:
+        description: 'Require native Save refusal with guest VSS disabled and preservation of prior export'
+        type: boolean
+        default: false
 permissions:
   contents: read
 jobs:
@@ -51,6 +55,7 @@ jobs:
       WINDOWS_STATE_MEDIA_SHA256: ${{ github.event_name == 'workflow_dispatch' && inputs.media_sha256 || '' }}
       WINDOWS_STATE_INSTALL_IMAGE: ${{ github.event_name == 'workflow_dispatch' && inputs.install_image || false }}
       WINDOWS_STATE_FIXTURE: ${{ github.event_name == 'workflow_dispatch' && inputs.fixture || false }}
+      WINDOWS_STATE_VSS_ATTACK: ${{ github.event_name == 'workflow_dispatch' && inputs.vss_attack || false }}
       WINDOWS_STATE_CHECKPOINT_ROUNDTRIP: ${{ github.event_name == 'workflow_dispatch' && inputs.checkpoint_roundtrip || false }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
