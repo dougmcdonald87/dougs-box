@@ -2,7 +2,7 @@ $ErrorActionPreference='Stop'
 if($env:GITHUB_ACTIONS -ne 'true' -or $env:DEVBOX_ISOLATED_TEST -ne '1'){throw 'Disposable CI runner only.'}
 . (Join-Path $PSScriptRoot '../scripts/windows-state-probe.ps1')
 & (Join-Path $PSScriptRoot '../scripts/bootstrap.ps1') -CloudCandidate
-if($LASTEXITCODE -ne 0){throw 'Owned E bootstrap failed'}
+if(-not $? -or -not (Test-Path 'E:/DevBox/Control/session.json')){throw 'Owned E bootstrap failed'}
 $root='E:/DevBox/Tools/WindowsStateProbe/probe-'+$env:GITHUB_RUN_ID+'-'+$env:GITHUB_RUN_ATTEMPT
 $name='DevBoxWindowsState-'+$env:GITHUB_RUN_ID+'-'+$env:GITHUB_RUN_ATTEMPT
 $owner=$null
