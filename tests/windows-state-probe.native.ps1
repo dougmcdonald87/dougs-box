@@ -25,15 +25,16 @@ try {
     if($env:WINDOWS_STATE_MEDIA_URI){
         . (Join-Path $PSScriptRoot '../scripts/windows-home-media.ps1')
         $media=Get-WindowsHomeMedia -Root $root -VmName $name -Uri $env:WINDOWS_STATE_MEDIA_URI -Sha256 $env:WINDOWS_STATE_MEDIA_SHA256
+        Write-Output ('NATIVE ISO HASH + BYTES VERIFIED: '+($media|ConvertTo-Json -Compress))
         $image=Mount-DiskImage -ImagePath $media.path -PassThru -ErrorAction Stop
         try {
             $volume=$image | Get-Volume -ErrorAction Stop
             if(@($volume).Count -ne 1 -or -not $volume.DriveLetter){throw 'Installer volume ambiguous'}
             $wim=([string]$volume.DriveLetter)+':\sources\install.wim'
             if(-not (Test-Path -LiteralPath $wim)){throw 'Expected official install.wim missing'}
-            $home=@(Get-WindowsImage -ImagePath $wim -ErrorAction Stop | Where-Object {$_.ImageName -ceq 'Windows 10 Home'})
-            if($home.Count -ne 1){throw 'Windows 10 Home image ambiguous or missing'}
-            $detail=Get-WindowsImage -ImagePath $wim -Index $home[0].ImageIndex -ErrorAction Stop
+            $homeImages=@(Get-WindowsImage -ImagePath $wim -ErrorAction Stop | Where-Object {$_.ImageName -ceq 'Windows 10 Home'})
+            if($homeImages.Count -ne 1){throw 'Windows 10 Home image ambiguous or missing'}
+            $detail=Get-WindowsImage -ImagePath $wim -Index $homeImages[0].ImageIndex -ErrorAction Stop
             if($detail.EditionId -cne 'Core'){throw 'Selected Windows image is not Home/Core'}
             Write-Output ('NATIVE WINDOWS10 HOME MEDIA VERIFIED: '+([pscustomobject]@{sha256=$media.sha256;bytes=$media.bytes;index=$detail.ImageIndex;name=$detail.ImageName;edition=$detail.EditionId;version=[string]$detail.Version;imageBytes=$detail.ImageSize}|ConvertTo-Json -Compress))
         } finally {Dismount-DiskImage -ImagePath $media.path -ErrorAction Stop | Out-Null}

@@ -6,6 +6,7 @@ on:
       - 'tests/windows-state-probe*'
       - 'tests/windows-state-disk*'
       - 'tests/windows-state-install*'
+      - 'tests/reserved-variable.tests.ps1'
       - '.github/workflows/windows-state-probe-validate.yml'
   workflow_dispatch:
     inputs:
@@ -36,6 +37,9 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
           persist-credentials: false
+      - name: Refuse reserved PowerShell HOME assignments
+        shell: pwsh
+        run: ./tests/reserved-variable.tests.ps1
       - name: Test ownership refusals and Windows Home hardware policy
         shell: pwsh
         run: ./tests/windows-state-probe.tests.ps1

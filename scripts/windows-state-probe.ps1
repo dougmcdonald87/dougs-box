@@ -179,9 +179,9 @@ function Install-WindowsStateHomeImage {
         $volume=$iso | Get-Volume -ErrorAction Stop
         if(@($volume).Count -ne 1 -or -not $volume.DriveLetter){throw 'Installation ISO volume ambiguous.'}
         $wim=([string]$volume.DriveLetter)+':\sources\install.wim'
-        $home=@(Get-WindowsImage -ImagePath $wim -ErrorAction Stop | Where-Object {$_.ImageName -ceq 'Windows 10 Home'})
-        if($home.Count -ne 1){throw 'Installation requires exactly one Windows 10 Home image.'}
-        $detail=Get-WindowsImage -ImagePath $wim -Index $home[0].ImageIndex -ErrorAction Stop
+        $homeImages=@(Get-WindowsImage -ImagePath $wim -ErrorAction Stop | Where-Object {$_.ImageName -ceq 'Windows 10 Home'})
+        if($homeImages.Count -ne 1){throw 'Installation requires exactly one Windows 10 Home image.'}
+        $detail=Get-WindowsImage -ImagePath $wim -Index $homeImages[0].ImageIndex -ErrorAction Stop
         if($detail.EditionId -cne 'Core'){throw 'Installation image is not Home/Core.'}
         $mounted=Mount-VHD -Path $diskPath -PassThru -ErrorAction Stop
         $disk=Get-Disk -Number $mounted.DiskNumber -ErrorAction Stop
