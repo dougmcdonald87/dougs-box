@@ -226,8 +226,16 @@ try {
             }
         }
     }
+} catch {
+    Write-Host ('NATIVE PROBE PRIMARY FAILURE: '+$_.Exception.Message)
+    Write-Host ('NATIVE PROBE FAILURE LOCATION: '+$_.ScriptStackTrace)
+    throw
 } finally {
-    if($owner){Remove-WindowsStateProbe -Root $root -VmName $name}
+    if($owner){
+        $registered=Get-VM -Id ([guid]::Parse($owner.vmId)) -ErrorAction SilentlyContinue
+        if($registered){Remove-WindowsStateProbe -Root $root -VmName $name}
+        else {Write-Host 'NATIVE CLEANUP: owned VM registration already absent; original/export files preserved.'}
+    }
 }
 if(@(Get-VM -ErrorAction Stop | Where-Object {$_.Id -eq $id}).Count){throw 'Owned VM cleanup failed'}
 Write-Output 'NATIVE OWNERSHIP + VM START + DISK + CLEANUP: PASS; optional OS/fixture evidence is reported separately above.'
