@@ -2,6 +2,7 @@ $ErrorActionPreference='Stop'
 if($env:GITHUB_ACTIONS -ne 'true' -or $env:DEVBOX_ISOLATED_TEST -ne '1'){throw 'Disposable CI runner only.'}
 if($env:WINDOWS_STATE_INSTALL_IMAGE -eq 'true' -and -not $env:WINDOWS_STATE_MEDIA_URI){throw 'Native image test requires an explicit official media URI.'}
 if($env:WINDOWS_STATE_FIXTURE -eq 'true' -and $env:WINDOWS_STATE_INSTALL_IMAGE -ne 'true'){throw 'Native fixture test requires image installation.'}
+if($env:WINDOWS_STATE_CHECKPOINT_ROUNDTRIP -eq 'true' -and $env:WINDOWS_STATE_FIXTURE -ne 'true'){throw 'Native checkpoint roundtrip requires real guest fixture.'}
 . (Join-Path $PSScriptRoot '../scripts/windows-state-probe.ps1')
 & (Join-Path $PSScriptRoot '../scripts/bootstrap.ps1') -CloudCandidate
 if(-not $? -or -not (Test-Path 'E:/DevBox/Control/session.json')){throw 'Owned E bootstrap failed'}
@@ -120,15 +121,80 @@ try {
                     Write-Output 'NATIVE PROGRAM + DOCUMENT + APPLICATION/HKCU SETTINGS + IDENTITY SECOND BOOT: PASS'
                 } finally {Remove-PSSession $session}
             }
-            Stop-VM -VM (Get-VM -Id $id -ErrorAction Stop) -ErrorAction Stop
-            if($guestCredential){
-                $offDeadline=[DateTime]::UtcNow.AddMinutes(2)
-                while((Get-VM -Id $id).State -ne 'Off' -and [DateTime]::UtcNow -lt $offDeadline){Start-Sleep -Seconds 5}
-                if((Get-VM -Id $id).State -ne 'Off'){throw 'Capacity measurement requires clean guest shutdown'}
-                . (Join-Path $PSScriptRoot '../scripts/windows-state-capacity.ps1')
-                $capacity=Measure-WindowsStateExportCapacity -Root $root -VmName $name
-                Write-Output ('NATIVE WHOLE GUEST ENCRYPTED CAPACITY: '+($capacity|ConvertTo-Json -Compress))
-                if(-not $capacity.fitsExistingTransport){throw ('Whole guest falsifies existing 8GiB transport: '+$capacity.archiveBytes+' archive bytes')}
+            if($env:WINDOWS_STATE_CHECKPOINT_ROUNDTRIP -eq 'true'){
+                . (Join-Path $PSScriptRoot '../scripts/windows-state-checkpoint.ps1')
+                function Open-CheckpointFixtureSession {
+                    $session=$null;$deadline=[DateTime]::UtcNow.AddMinutes(5)
+                    do {
+                        try {$session=New-PSSession -VMId $id -Credential $guestCredential -ErrorAction Stop}
+                        catch {Start-Sleep -Seconds 10}
+                    } while(-not $session -and [DateTime]::UtcNow -lt $deadline)
+                    if(-not $session){throw 'Checkpoint fixture guest session unavailable'}
+                    Assert-WindowsStateGuestSession -GuestSession $session -VmId $id
+                    $session
+                }
+                function Assert-CheckpointFixtureEqual($actual,$expected){
+                    foreach($property in @('machineName','machineGuid','programPath','programVersion','documentSha256','windowsHideFileExt')){
+                        if($actual.$property -cne $expected.$property){throw ('Restored checkpoint fixture mismatch: '+$property)}
+                    }
+                    if($actual.preferences.theme -cne $expected.preferences.theme -or $actual.preferences.volume -ne $expected.preferences.volume){throw 'Restored checkpoint application preferences mismatch'}
+                }
+                $saved=Export-WindowsStateCheckpoint -Root $root -VmId $id -Mode save
+                Write-Output ('NATIVE RUNNING PRODUCTION SAVE EXPORTED: '+($saved|ConvertTo-Json -Compress))
+                # Change the source after Save: importing Save must recover the prior values.
+                $session=Open-CheckpointFixtureSession
+                try {
+                    Invoke-Command -Session $session -ErrorAction Stop -ScriptBlock {
+                        $encoding=[Text.UTF8Encoding]::new($false)
+                        [IO.File]::WriteAllText((Join-Path $env:USERPROFILE 'Documents\DevBoxFixture.txt'),"DevBox post-save document fixture v2`n",$encoding)
+                        [IO.File]::WriteAllText((Join-Path $env:APPDATA 'DevBoxFixture\preferences.json'),'{"theme":"light","volume":84}',$encoding)
+                        Set-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' -Name HideFileExt -Value 1 -ErrorAction Stop
+                    }
+                    $finishBaseline=Get-WindowsStateFixture -GuestSession $session -VmId $id
+                    if($finishBaseline.documentSha256 -ceq $baseline.documentSha256 -or $finishBaseline.preferences.volume -eq $baseline.preferences.volume){throw 'Post-Save source mutation did not distinguish checkpoint generations'}
+                    Write-Output ('NATIVE POST-SAVE SOURCE FIXTURE: '+($finishBaseline|Select-Object machineName,machineGuid,programPath,programVersion,documentSha256,preferences,windowsHideFileExt|ConvertTo-Json -Compress))
+                } finally {Remove-PSSession $session}
+                $finished=Export-WindowsStateCheckpoint -Root $root -VmId $id -Mode finish
+                Write-Output ('NATIVE CLEAN FINISH EXPORTED: '+($finished|ConvertTo-Json -Compress))
+                # Hash/configuration checks before unregistering the only owned source.
+                foreach($receipt in @($saved,$finished)){
+                    $verifyPath=Join-Path (Split-Path $receipt.manifestPath -Parent) 'native-preimport-verification.json'
+                    @{vm_id=$id.ToString();supported_versions=@(Get-VMHostSupportedVersion|ForEach-Object {$_.Version.ToString()})}|ConvertTo-Json -Depth 5|Set-Content -LiteralPath $verifyPath -Encoding utf8
+                    try {
+                        & python (Join-Path $PSScriptRoot '../scripts/windows_state_manifest.py') verify --root $receipt.exportPath --metadata $verifyPath --manifest $receipt.manifestPath | ForEach-Object {Write-Host $_}
+                        if($LASTEXITCODE -ne 0){throw 'Native pre-import verification failed; source registration preserved'}
+                    } finally {Remove-Item -LiteralPath $verifyPath -Force}
+                }
+                $owned=Get-WindowsStateCheckpointOwner -Root $root -VmId $id
+                if($owned.vm.State -ne 'Off'){throw 'Owned source must be off before deliberate test unregister'}
+                Remove-VM -VM $owned.vm -Force -ErrorAction Stop
+                foreach($case in @([pscustomobject]@{receipt=$saved;expected=$baseline;label='restored-save'},[pscustomobject]@{receipt=$finished;expected=$finishBaseline;label='restored-finish'})){
+                    $imported=Import-WindowsStateCheckpoint -Root $root -VmId $id -ExportPath $case.receipt.exportPath -ManifestPath $case.receipt.manifestPath -DestinationLabel $case.label
+                    Start-VM -VM $imported -ErrorAction Stop
+                    $session=Open-CheckpointFixtureSession
+                    try {$actual=Get-WindowsStateFixture -GuestSession $session -VmId $id;Assert-CheckpointFixtureEqual $actual $case.expected}
+                    finally {Remove-PSSession $session}
+                    Write-Output ('NATIVE '+$case.label.ToUpperInvariant()+' SAME VM ID + PROGRAM + DOCUMENT + APPLICATION/HKCU + MACHINE ID: PASS')
+                    Stop-VM -VM (Get-VM -Id $id) -ErrorAction Stop
+                    $deadline=[DateTime]::UtcNow.AddMinutes(2)
+                    while((Get-VM -Id $id).State -ne 'Off' -and [DateTime]::UtcNow -lt $deadline){Start-Sleep -Seconds 5}
+                    if((Get-VM -Id $id).State -ne 'Off'){throw 'Restored checkpoint clean shutdown failed'}
+                    if($case.label -eq 'restored-save'){
+                        $owned=Get-WindowsStateCheckpointOwner -Root $root -VmId $id
+                        Remove-VM -VM $owned.vm -Force -ErrorAction Stop
+                    }
+                }
+            } else {
+                Stop-VM -VM (Get-VM -Id $id -ErrorAction Stop) -ErrorAction Stop
+                if($guestCredential){
+                    $offDeadline=[DateTime]::UtcNow.AddMinutes(2)
+                    while((Get-VM -Id $id).State -ne 'Off' -and [DateTime]::UtcNow -lt $offDeadline){Start-Sleep -Seconds 5}
+                    if((Get-VM -Id $id).State -ne 'Off'){throw 'Capacity measurement requires clean guest shutdown'}
+                    . (Join-Path $PSScriptRoot '../scripts/windows-state-capacity.ps1')
+                    $capacity=Measure-WindowsStateExportCapacity -Root $root -VmName $name
+                    Write-Output ('NATIVE WHOLE GUEST ENCRYPTED CAPACITY: '+($capacity|ConvertTo-Json -Compress))
+                    if(-not $capacity.fitsExistingTransport){throw ('Whole guest falsifies existing 8GiB transport: '+$capacity.archiveBytes+' archive bytes')}
+                }
             }
         }
     }

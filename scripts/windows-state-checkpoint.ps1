@@ -115,7 +115,7 @@ function Export-WindowsStateCheckpoint {
 }
 
 function Import-WindowsStateCheckpoint {
-    param([Parameter(Mandatory)][string]$Root,[Parameter(Mandatory)][guid]$VmId,[Parameter(Mandatory)][string]$ExportPath,[Parameter(Mandatory)][string]$ManifestPath)
+    param([Parameter(Mandatory)][string]$Root,[Parameter(Mandatory)][guid]$VmId,[Parameter(Mandatory)][string]$ExportPath,[Parameter(Mandatory)][string]$ManifestPath,[ValidateSet('restored','restored-save','restored-finish')][string]$DestinationLabel='restored')
     $owner=Get-WindowsStateCheckpointOwner -Root $Root -VmId $VmId -AllowMissingVm
     if($owner.vm){throw 'Existing owned VM registration must be preserved until export is verified and deliberately unregistered.'}
     $payload=Assert-WindowsStateOwnedPath -Root $Root -Path $ExportPath
@@ -134,16 +134,29 @@ function Import-WindowsStateCheckpoint {
         if(($actualDisks | ConvertTo-Json -Depth 5 -Compress) -cne ($record.disks | ConvertTo-Json -Depth 5 -Compress)){throw 'Native VHD disk/parent metadata differs from manifest.'}
         $config=Assert-WindowsStateOwnedPath -Root $payload -Path (Join-Path $payload $record.config)
         $vmPath=Assert-WindowsStateOwnedPath -Root $Root -Path (Join-Path $Root $owner.name)
-        $diskPath=Assert-WindowsStateOwnedPath -Root $Root -Path (Join-Path $Root 'restored-disks')
-        $snapshotPath=Assert-WindowsStateOwnedPath -Root $Root -Path (Join-Path $Root 'restored-snapshots')
+        $diskPath=Assert-WindowsStateOwnedPath -Root $Root -Path (Join-Path $Root ($DestinationLabel+'-disks'))
+        $snapshotPath=Assert-WindowsStateOwnedPath -Root $Root -Path (Join-Path $Root ($DestinationLabel+'-snapshots'))
         foreach($destination in @($diskPath,$snapshotPath)){if(Test-Path -LiteralPath $destination){throw 'Import destination must not replace existing files.'}}
         $required=($record.files | Measure-Object -Property bytes -Sum).Sum
         if((Get-PSDrive E).Free -lt ($required+2GB)){throw 'Import free space insufficient.'}
-        $report=Compare-VM -Path $config -Copy -VirtualMachinePath $vmPath -VhdDestinationPath $diskPath -SnapshotFilePath $snapshotPath -ErrorAction Stop
+        $sourceDirectories=@($record.disks | ForEach-Object {Split-Path (Join-Path $payload $_.path) -Parent} | Sort-Object -Unique)
+        if($sourceDirectories.Count -ne 1){throw 'Export disk layout requires explicit supported source directory.'}
+        $report=Compare-VM -Path $config -Copy -VhdSourcePath $sourceDirectories[0] -VirtualMachinePath $vmPath -VhdDestinationPath $diskPath -SnapshotFilePath $snapshotPath -ErrorAction Stop
         $issues=@($report.Incompatibilities | Where-Object {$_})
         if($issues.Count -or $report.VM.Id -ne $VmId -or $report.VM.Name -cne $owner.name){throw 'Hyper-V compatibility or preserved identity check refused import.'}
         $vm=Import-VM -CompatibilityReport $report -ErrorAction Stop
         if($vm.Id -ne $VmId -or $vm.Name -cne $owner.name -or -not (Test-WindowsStateProbeVmPath -Root $Root -VmName $owner.name -VmPath $vm.Path)){throw 'Imported VM identity/path did not match verified export.'}
+        $importedDrives=@(Get-VMHardDiskDrive -VM $vm -ErrorAction Stop)
+        if($importedDrives.Count -ne 1){throw 'Imported guest disk attachment mismatch.'}
+        $cursor=$importedDrives[0].Path;$seen=@{}
+        while($cursor){
+            $cursor=Assert-WindowsStateOwnedPath -Root $diskPath -Path $cursor
+            if($seen.ContainsKey($cursor.ToLowerInvariant())){throw 'Imported disk parent cycle refused.'}
+            $seen[$cursor.ToLowerInvariant()]=$true
+            $disk=Get-VHD -Path $cursor -ErrorAction Stop
+            if($disk.Size -ne 64GB -or $disk.VhdType -notin @('Dynamic','Differencing')){throw 'Imported disk metadata mismatch.'}
+            $cursor=$disk.ParentPath
+        }
         $vm
     } finally {if(Test-Path -LiteralPath $verification){Remove-Item -LiteralPath $verification -Force}}
 }
