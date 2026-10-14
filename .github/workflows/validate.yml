@@ -103,7 +103,10 @@ jobs:
 
       - name: Adversarial user-stop control regression
         shell: pwsh
-        run: ./tests/control-queue.tests.ps1
+        run: |
+          ./tests/control-queue.tests.ps1
+          ./tests/request-control-wait.tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Long backup wait tests failed' }
 
       - name: Append-only law + data-loss audit
         # Phase 41: destructive commands must appear in ZERO code files.

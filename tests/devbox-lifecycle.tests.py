@@ -81,6 +81,16 @@ class LifecycleTests(unittest.TestCase):
                 self.assertIn('-Action stop', argv[-1])
                 self.assertEqual(runner.call_count, 1)
 
+    def test_large_backup_wait_has_no_short_client_deadline(self):
+        with tempfile.TemporaryDirectory() as directory:
+            state = Path(directory)
+            (state / 'manifest.json').write_text(json.dumps({'version': 1, 'runId': '17'}))
+            with patch.object(m.shutil, 'which', return_value='/usr/local/bin/devbox'), patch.object(m.subprocess, 'run', return_value=m.subprocess.CompletedProcess([], 0)) as runner:
+                m.safe_control('stop', 17, state)
+                argv = runner.call_args.args[0]
+                self.assertEqual(argv[argv.index('--timeout') + 1], '0')
+                self.assertIsNone(runner.call_args.kwargs['timeout'])
+
     def test_redirect_cannot_forward_bearer(self):
         self.assertIsNone(m.NoRedirect().redirect_request(None, None, 302, '', {}, 'https://other.example'))
 

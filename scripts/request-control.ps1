@@ -33,8 +33,9 @@ try {
     Set-Content -LiteralPath $temp -Value "Requested $Action at $([DateTime]::UtcNow.ToString('o'))" -Encoding utf8
     Move-Item -LiteralPath $temp -Destination $request -ErrorAction Stop
 
-    $deadline = [DateTime]::UtcNow.AddMinutes(5)
-    while ([DateTime]::UtcNow -lt $deadline) {
+    $started = [DateTime]::UtcNow
+    $nextProgress = $started.AddMinutes(1)
+    while ($true) {
         if (Test-Path -LiteralPath $response -PathType Leaf) {
             $result = Get-Content -LiteralPath $response -Raw | ConvertFrom-Json -ErrorAction Stop
             if ([string]$result.id -ne $nonce -or [string]$result.action -ne $Action) {
@@ -53,11 +54,13 @@ try {
             Write-Host 'Do NOT cancel the GitHub run; the previous snapshot may be all that is safe.'
             End-Interactive 2
         }
+        if ([DateTime]::UtcNow -ge $nextProgress) {
+            $minutes = [math]::Floor(([DateTime]::UtcNow - $started).TotalMinutes)
+            Write-Host "Still waiting for the verified backup result ($minutes minutes). Do not cancel the GitHub run."
+            $nextProgress = [DateTime]::UtcNow.AddMinutes(1)
+        }
         Start-Sleep -Seconds 3
     }
-    Write-Host 'NO CONFIRMATION within five minutes. Do not assume backup succeeded.'
-    Write-Host 'Inspect the active GitHub run and last-backup.json before stopping.'
-    End-Interactive 2
 } catch {
     Write-Host "DEVBOX CONTROL ERROR: $($_.Exception.Message)"
     End-Interactive 2
