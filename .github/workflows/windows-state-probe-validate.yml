@@ -9,6 +9,8 @@ on:
       - 'tests/windows-state-guest*'
       - 'scripts/windows-state-fixture.ps1'
       - 'scripts/windows-state-capacity.ps1'
+      - 'scripts/windows_state_manifest.py'
+      - 'tests/windows-state-checkpoint*'
       - 'tests/windows-state-capacity*'
       - 'tests/reserved-variable.tests.ps1'
       - '.github/workflows/windows-state-probe-validate.yml'
@@ -64,6 +66,9 @@ jobs:
       - name: Refuse foreign whole-guest capacity export roots
         shell: pwsh
         run: ./tests/windows-state-capacity.tests.ps1
+      - name: Verify whole VM corruption identity parent and consistency refusals
+        shell: pwsh
+        run: python ./tests/windows-state-checkpoint.tests.py
       - name: Start and remove only the owned empty VM on disposable Windows
         shell: pwsh
         run: ./tests/windows-state-probe.native.ps1
