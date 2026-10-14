@@ -22,6 +22,12 @@ try {
     catch {if($_.Exception.Message -notmatch '^Existing guest disk must not be replaced'){throw}}
     if((Get-FileHash -LiteralPath $disk.diskPath -Algorithm SHA256).Hash -cne $hash){throw 'Refused retry changed existing disk'}
     Write-Output ('NATIVE OWNED DYNAMIC DISK + REFUSED RETRY: '+($disk|ConvertTo-Json -Compress))
+    $nativeMount=Mount-VHD -Path $disk.diskPath -PassThru -ErrorAction Stop
+    try {
+        $nativeDisk=Get-Disk -Number $nativeMount.DiskNumber -ErrorAction Stop
+        $nativeVhd=Get-VHD -Path $disk.diskPath -ErrorAction Stop
+        Write-Output ('NATIVE EMPTY VHD MAPPING OBSERVATIONS: '+([pscustomobject]@{path=$nativeVhd.Path;diskNumber=$nativeDisk.Number;resolvedDiskNumber=$nativeVhd.DiskNumber;busType=$nativeDisk.BusType.ToString();busTypeObject=$nativeDisk.BusType.GetType().FullName;partitionStyle=$nativeDisk.PartitionStyle.ToString();partitions=$nativeDisk.NumberOfPartitions;isBoot=$nativeDisk.IsBoot;isSystem=$nativeDisk.IsSystem;mounted=$nativeVhd.Attached}|ConvertTo-Json -Compress))
+    } finally {Dismount-VHD -Path $disk.diskPath -ErrorAction Stop}
     if($env:WINDOWS_STATE_MEDIA_URI){
         . (Join-Path $PSScriptRoot '../scripts/windows-home-media.ps1')
         $media=Get-WindowsHomeMedia -Root $root -VmName $name -Uri $env:WINDOWS_STATE_MEDIA_URI -Sha256 $env:WINDOWS_STATE_MEDIA_SHA256
