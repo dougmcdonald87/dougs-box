@@ -9,3 +9,13 @@ foreach($session in @($null,[pscustomobject]@{Runspace=[pscustomobject]@{Connect
     catch {if($_.Exception.Message -notmatch '^Only an open PowerShell Direct guest session'){throw}}
 }
 Write-Output 'NULL AND FORGED GUEST SESSIONS REFUSED BEFORE INVOKE: PASS'
+
+if(-not (Get-Command New-WindowsStateFixtureAnswerFile -ErrorAction SilentlyContinue)){throw 'Fixture setup answer-file builder unavailable'}
+$testCredential=[pscredential]::new('DevBoxFixture',(ConvertTo-SecureString 'FixtureOnly-Test123!' -AsPlainText -Force))
+[xml]$answer=New-WindowsStateFixtureAnswerFile -Credential $testCredential
+$ns=[Xml.XmlNamespaceManager]::new($answer.NameTable);$ns.AddNamespace('u','urn:schemas-microsoft-com:unattend')
+$account=$answer.SelectSingleNode('//u:LocalAccount',$ns)
+if($account.Name -cne 'DevBoxFixture' -or $account.Group -cne 'Administrators'){throw 'Fixture local account contract failed'}
+if($answer.SelectNodes('//u:settings[@pass="oobeSystem"]',$ns).Count -ne 1){throw 'Fixture OOBE setup pass missing'}
+if($answer.SelectNodes('//u:SkipMachineOOBE|//u:SkipUserOOBE|//u:ProductKey',$ns).Count){throw 'Unsupported setup bypass or activation field included'}
+Write-Output 'SUPPORTED FIXTURE OOBE ANSWER-FILE CONTRACT: PASS'
