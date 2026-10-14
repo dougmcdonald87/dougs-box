@@ -128,6 +128,9 @@ if __name__=='__main__':
         if destination.exists():raise ManifestError('Existing immutable manifest must not be replaced')
         consistency=consistency_policy(metadata['mode'],metadata['state'],metadata.get('production_only',False),metadata.get('checkpoint_id'),metadata.get('shutdown_verified',False))
         value=make_manifest(args.root,metadata['vm_id'],metadata['vm_name'],metadata['configuration_version'],metadata['mode'],consistency,metadata['disks'])
+        if 'generation' in metadata:
+            value['generation']=metadata['generation']
+            _structure(value,metadata['vm_id'],[metadata['configuration_version']])
         payload=json.dumps(value,indent=2).encode()
         if len(payload)>1024**2:raise ManifestError('Manifest exceeds metadata limit')
         with destination.open('xb') as stream:stream.write(payload)

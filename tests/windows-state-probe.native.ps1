@@ -30,6 +30,26 @@ try {
         $nativeVhd=Get-VHD -Path $disk.diskPath -ErrorAction Stop
         Write-Output ('NATIVE EMPTY VHD MAPPING OBSERVATIONS: '+([pscustomobject]@{path=$nativeVhd.Path;diskNumber=$nativeDisk.Number;resolvedDiskNumber=$nativeVhd.DiskNumber;busType=$nativeDisk.BusType.ToString();busTypeObject=$nativeDisk.BusType.GetType().FullName;partitionStyle=$nativeDisk.PartitionStyle.ToString();partitions=$nativeDisk.NumberOfPartitions;isBoot=$nativeDisk.IsBoot;isSystem=$nativeDisk.IsSystem;mounted=$nativeVhd.Attached}|ConvertTo-Json -Compress))
     } finally {Dismount-VHD -Path $disk.diskPath -ErrorAction Stop}
+    # Cheap export identity observation before any ISO download or installed guest.
+    $vm=Get-VM -Id $id;$priorCheckpointType=$vm.CheckpointType;$identitySnapshot=$null
+    try {
+        Set-VM -VM $vm -CheckpointType Standard -ErrorAction Stop
+        Checkpoint-VM -VM $vm -SnapshotName 'OwnedEmptyIdentityProbe' -ErrorAction Stop
+        $identitySnapshot=Get-VMSnapshot -VM $vm -Name 'OwnedEmptyIdentityProbe' -ErrorAction Stop
+        $identityExport=Join-Path $root 'empty-checkpoint-identity'
+        New-Item -ItemType Directory -Path $identityExport | Out-Null
+        Export-VMSnapshot -VMSnapshot $identitySnapshot -Path $identityExport -ErrorAction Stop | Out-Null
+        $configs=@(Get-ChildItem -LiteralPath $identityExport -Recurse -File -Filter '*.vmcx')
+        if($configs.Count -ne 1){throw 'Empty checkpoint export configuration ambiguous'}
+        $identityReport=Compare-VM -Path $configs[0].FullName -Copy -ErrorAction Stop
+        Write-Output ('NATIVE EMPTY CHECKPOINT EXPORT IDENTITY: '+([pscustomobject]@{sourceVmId=$id.ToString();checkpointId=$identitySnapshot.Id.ToString();configurationFile=$configs[0].Name;exportedVmId=$identityReport.VM.Id.ToString();exportedVmName=$identityReport.VM.Name}|ConvertTo-Json -Compress))
+    } finally {
+        if($identitySnapshot){Remove-VMSnapshot -VMSnapshot $identitySnapshot -Confirm:$false -ErrorAction Stop}
+        Set-VM -VM (Get-VM -Id $id) -CheckpointType $priorCheckpointType -ErrorAction Stop
+    }
+    $mergeDeadline=[DateTime]::UtcNow.AddMinutes(1)
+    while([IO.Path]::GetFullPath((Get-VMHardDiskDrive -VM (Get-VM -Id $id))[0].Path) -ine [IO.Path]::GetFullPath($disk.diskPath) -and [DateTime]::UtcNow -lt $mergeDeadline){Start-Sleep -Seconds 2}
+    if([IO.Path]::GetFullPath((Get-VMHardDiskDrive -VM (Get-VM -Id $id))[0].Path) -ine [IO.Path]::GetFullPath($disk.diskPath)){throw 'Owned empty identity checkpoint merge did not finish'}
     if($env:WINDOWS_STATE_MEDIA_URI){
         . (Join-Path $PSScriptRoot '../scripts/windows-home-media.ps1')
         $media=Get-WindowsHomeMedia -Root $root -VmName $name -Uri $env:WINDOWS_STATE_MEDIA_URI -Sha256 $env:WINDOWS_STATE_MEDIA_SHA256
