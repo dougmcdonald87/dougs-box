@@ -32,22 +32,15 @@ try {
         Write-Output ('NATIVE EMPTY VHD MAPPING OBSERVATIONS: '+([pscustomobject]@{path=$nativeVhd.Path;diskNumber=$nativeDisk.Number;resolvedDiskNumber=$nativeVhd.DiskNumber;busType=$nativeDisk.BusType.ToString();busTypeObject=$nativeDisk.BusType.GetType().FullName;partitionStyle=$nativeDisk.PartitionStyle.ToString();partitions=$nativeDisk.NumberOfPartitions;isBoot=$nativeDisk.IsBoot;isSystem=$nativeDisk.IsSystem;mounted=$nativeVhd.Attached}|ConvertTo-Json -Compress))
     } finally {Dismount-VHD -Path $disk.diskPath -ErrorAction Stop}
     # Cheap export identity observation before any ISO download or installed guest.
-    $vm=Get-VM -Id $id;$priorCheckpointType=$vm.CheckpointType;$identitySnapshot=$null
-    try {
-        Set-VM -VM $vm -CheckpointType Standard -ErrorAction Stop
-        Checkpoint-VM -VM $vm -SnapshotName 'OwnedEmptyIdentityProbe' -ErrorAction Stop
-        $identitySnapshot=Get-VMSnapshot -VM $vm -Name 'OwnedEmptyIdentityProbe' -ErrorAction Stop
-        $identityExport=Join-Path $root 'empty-checkpoint-identity'
-        New-Item -ItemType Directory -Path $identityExport | Out-Null
-        Export-VMSnapshot -VMSnapshot $identitySnapshot -Path $identityExport -ErrorAction Stop | Out-Null
-        $configs=@(Get-ChildItem -LiteralPath $identityExport -Recurse -File -Filter '*.vmcx')
-        if($configs.Count -ne 1){throw 'Empty checkpoint export configuration ambiguous'}
-        $configurationId=[guid]::Parse($configs[0].BaseName)
-        Write-Output ('NATIVE EMPTY CHECKPOINT CONFIGURATION FILENAME: '+([pscustomobject]@{sourceVmId=$id.ToString();checkpointId=$identitySnapshot.Id.ToString();configurationFile=$configs[0].Name;configurationId=$configurationId.ToString();evidence='filename-only; actual same-ID import requires source unregistered'}|ConvertTo-Json -Compress))
-    } finally {
-        if($identitySnapshot){Remove-VMSnapshot -VMSnapshot $identitySnapshot -Confirm:$false -ErrorAction Stop}
-        Set-VM -VM (Get-VM -Id $id) -CheckpointType $priorCheckpointType -ErrorAction Stop
-    }
+    $vm=Get-VM -Id $id;$priorCheckpointType=$vm.CheckpointType
+    if($vm.State -ne 'Off'){throw 'Empty whole VM export requires Off state'}
+    $identityExport=Join-Path $root 'empty-whole-vm-identity'
+    New-Item -ItemType Directory -Path $identityExport | Out-Null
+    Export-VM -VM $vm -Path $identityExport -ErrorAction Stop | Out-Null
+    $configs=@(Get-ChildItem -LiteralPath $identityExport -Recurse -File -Filter '*.vmcx')
+    if($configs.Count -ne 1){throw 'Empty whole VM export configuration ambiguous'}
+    $configurationId=[guid]::Parse($configs[0].BaseName)
+    Write-Output ('NATIVE EMPTY WHOLE VM CONFIGURATION FILENAME: '+([pscustomobject]@{sourceVmId=$id.ToString();configurationFile=$configs[0].Name;configurationId=$configurationId.ToString();evidence='filename-only; actual same-ID import requires source unregistered'}|ConvertTo-Json -Compress))
     $postCheckpointPath=(Get-VMHardDiskDrive -VM (Get-VM -Id $id))[0].Path
     $postCheckpointDisk=Get-VHD -Path $postCheckpointPath -ErrorAction Stop
     Write-Output ('NATIVE EMPTY POST-CHECKPOINT DISK OBSERVATIONS: '+([pscustomobject]@{attachedPath=$postCheckpointPath;type=$postCheckpointDisk.VhdType.ToString();parent=$postCheckpointDisk.ParentPath;originalFileExists=(Test-Path -LiteralPath $disk.diskPath)}|ConvertTo-Json -Compress))
