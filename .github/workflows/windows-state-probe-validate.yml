@@ -13,6 +13,7 @@ on:
       - 'scripts/windows_state_transfer.py'
       - 'scripts/windows-state-roundtrip.ps1'
       - 'tests/windows-state-roundtrip.tests.ps1'
+      - 'tests/windows-state-package.native.ps1'
       - 'tests/windows-state-transfer.tests.py'
       - 'scripts/windows-state-checkpoint.ps1'
       - 'tests/windows-state-checkpoint*'
@@ -100,6 +101,9 @@ jobs:
       - name: Verify portable isolated fixture credential boundaries
         shell: pwsh
         run: ./tests/windows-state-roundtrip.tests.ps1
+      - name: Verify real small-file encrypted package canary and durable receipt
+        shell: pwsh
+        run: ./tests/windows-state-package.native.ps1
       - name: Refuse foreign whole VM checkpoint roots
         shell: pwsh
         run: ./tests/windows-state-checkpoint.tests.ps1
