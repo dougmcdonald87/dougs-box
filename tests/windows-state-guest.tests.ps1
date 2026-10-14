@@ -19,3 +19,10 @@ if($account.Name -cne 'DevBoxFixture' -or $account.Group -cne 'Administrators'){
 if($answer.SelectNodes('//u:settings[@pass="oobeSystem"]',$ns).Count -ne 1){throw 'Fixture OOBE setup pass missing'}
 if($answer.SelectNodes('//u:SkipMachineOOBE|//u:SkipUserOOBE|//u:ProductKey',$ns).Count){throw 'Unsupported setup bypass or activation field included'}
 Write-Output 'SUPPORTED FIXTURE OOBE ANSWER-FILE CONTRACT: PASS'
+
+foreach($name in @('Get-WindowsStateFixture','Install-WindowsStateFixture')){
+    if(-not (Get-Command $name -ErrorAction SilentlyContinue)){throw ('Guest fixture function unavailable: '+$name)}
+    try {& $name -GuestSession $null -VmId $id;throw 'Guest fixture reached host without session'}
+    catch {if($_.Exception.Message -notmatch '^Only an open PowerShell Direct guest session'){throw}}
+}
+Write-Output 'FIXTURE READ/WRITE REJECT HOST CONTEXT: PASS'
