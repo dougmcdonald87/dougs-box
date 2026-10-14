@@ -37,6 +37,19 @@ try {
             if($detail.EditionId -cne 'Core'){throw 'Selected Windows image is not Home/Core'}
             Write-Output ('NATIVE WINDOWS10 HOME MEDIA VERIFIED: '+([pscustomobject]@{sha256=$media.sha256;bytes=$media.bytes;index=$detail.ImageIndex;name=$detail.ImageName;edition=$detail.EditionId;version=[string]$detail.Version;imageBytes=$detail.ImageSize}|ConvertTo-Json -Compress))
         } finally {Dismount-DiskImage -ImagePath $media.path -ErrorAction Stop | Out-Null}
+        if($env:WINDOWS_STATE_INSTALL_IMAGE -eq 'true'){
+            $receipt=Install-WindowsStateHomeImage -Root $root -VmName $name -Sha256 $env:WINDOWS_STATE_MEDIA_SHA256
+            Write-Output ('NATIVE HOME IMAGE APPLIED: '+($receipt|ConvertTo-Json -Compress))
+            Start-VM -VM (Get-VM -Id $id -ErrorAction Stop) -ErrorAction Stop
+            $deadline=[DateTime]::UtcNow.AddMinutes(5);$heartbeat=$null
+            do {
+                Start-Sleep -Seconds 5
+                $heartbeat=Get-VMIntegrationService -VM (Get-VM -Id $id -ErrorAction Stop) -Name Heartbeat -ErrorAction Stop
+            } while($heartbeat.PrimaryStatusDescription -ne 'OK' -and [DateTime]::UtcNow -lt $deadline)
+            if($heartbeat.PrimaryStatusDescription -ne 'OK'){throw 'Applied Home guest did not report a healthy OS heartbeat'}
+            Write-Output ('NATIVE APPLIED WINDOWS10 DISK HEARTBEAT: '+$heartbeat.PrimaryStatusDescription+'; first-run setup and program fixture remain pending')
+            Stop-VM -VM (Get-VM -Id $id -ErrorAction Stop) -Shutdown -ErrorAction Stop
+        }
     }
 } finally {
     if($owner){Remove-WindowsStateProbe -Root $root -VmName $name}
