@@ -11,6 +11,8 @@ on:
       - 'scripts/windows-state-capacity.ps1'
       - 'scripts/windows_state_manifest.py'
       - 'scripts/windows_state_transfer.py'
+      - 'scripts/windows-state-roundtrip.ps1'
+      - 'tests/windows-state-roundtrip.tests.ps1'
       - 'tests/windows-state-transfer.tests.py'
       - 'scripts/windows-state-checkpoint.ps1'
       - 'tests/windows-state-checkpoint*'
@@ -85,6 +87,9 @@ jobs:
       - name: Refuse writes and wrong generations during fresh-host recovery
         shell: pwsh
         run: python ./tests/windows-state-transfer.tests.py
+      - name: Verify portable isolated fixture credential boundaries
+        shell: pwsh
+        run: ./tests/windows-state-roundtrip.tests.ps1
       - name: Refuse foreign whole VM checkpoint roots
         shell: pwsh
         run: ./tests/windows-state-checkpoint.tests.ps1
