@@ -1,3 +1,41 @@
+# Current DevBox handoff — 14 October 2026
+
+Windows 10 Home Save and clean-shutdown backups have both passed real local restore tests. They preserved the VM ID, installed Python, document contents, app preferences, a Windows setting, and the Windows machine identity. Recovery on an independently fresh outer host is still unverified.
+
+## Active work: check this run before starting anything else
+
+- Full encrypted Windows producer retry: https://github.com/dougmcdonald87/dougs-box/actions/runs/38647908553
+- Producer job: 116139263038. Source commit: 5f13bc6fa567fdcdea5342a7481cb679a4a8b5e9.
+- Started 14 October at 22:28:40 UTC (23:28:40 BST). Status was running when this handoff was written.
+- Do not start a duplicate, cancel it, start another main DevBox, or chain workflows automatically.
+
+## Evidence already obtained
+
+1. Full local Save A / Finish B recovery passed in run 38626065555, job 116065415923.
+2. Repeat Windows recovery passed in run 38643914142, job 116125964262. Disabling guest vmicvss made native Export-VM refuse Save with NotSupported; the prior complete checkpoint still verified. The service was restored afterward.
+3. That producer then failed at a GitHub transport operation. The old error hid the operation and HTTP status, so the cause remains unknown. Do not claim it was fixed or definitely transient.
+4. Added sanitized operation/status diagnostics, with an observed failing regression test followed by 21 passing cloud tests. The 15 transfer and 20 manifest tests also pass locally.
+5. Draft creation/upload/readback passed in run 38647198460. All operations, including publication, passed with 32 random test bytes in run 38647424106 and a full 536870912-byte chunk in run 38647637617. These are transport probes, not Windows backups.
+6. Real small-file encrypted backup/canary/receipt verification passed in run 38644981956. The full earlier Windows package passed local encryption/canary/bounds checks, but no accepted remote receipt was obtained.
+
+## Exact next actions
+
+Read the active producer's completed logs. If it fails again, use its new operation/HTTP diagnostics and measured archive size before changing code. If it succeeds, extract the exact generation from NATIVE ENCRYPTED WHOLE WINDOWS PUBLISHED, confirm the producer ended successfully, then manually dispatch one restore run.
+
+The consumer must run the same source commit as the producer. If this branch has advanced only for documentation/tests, verify the published generation tag points to producer commit 5f13bc6fa567fdcdea5342a7481cb679a4a8b5e9 and dispatch workflow ref=that generation tag, inputs transfer_phase=restore and expected_generation=that exact tag. Do not dispatch the newer branch head and ignore a SHA mismatch.
+
+Fresh recovery must authenticate the encrypted repository, verify the exact producer/generation, require different outer host UUID and run ID, verify every file/hash/parent/config/VM identity before import, and boot/run the actual fixture afterward. A successful hash or transfer alone is insufficient.
+
+After Task 4, perform one fresh-context whole-branch review using the approved plan/spec and the latest source comparison. The local git HEAD is old; review all changed files, including untracked source, against the authoritative GitHub comparison. Earlier f179 comparison is historical; refresh it for the final head. Review preparation notes record two author observations (bootstrap log output in the result stream and a legacy TPM-policy flag); they are not resolved findings yet.
+
+## Constraints and continuity
+
+Keep D and the Lenovo backup repository untouched. Main remains 2ca7bd4ad2c07ce1162d86be84c1a94c9045da55; this work is on the candidate branch and draft PR 29. No additional spending. This trial proves disk state only; RAM/process continuity and guest console/audio/clipboard access are not proven. Do not adopt the guest as the user's desktop before the approved proof/access gates.
+
+Update the same dev-box-hand-over.zip after every completed stage, including exact run IDs, failures, source and next actions. Current latest ZIP before this documentation update is version 146, Library identity libfile_52c1a755c190819186ba037ced7d0f73. The original uploaded credential source is DevBox_Start(4).py, Library identity libfile_73973ccbf9a481918da1705b46cbc816; no plaintext credential is copied into the ZIP.
+
+# Historical handoff entries below
+
 # Current Task4 wiring — 14October2026 22:54BST
 
 Actual full Windows local SaveA and FinishB restore run38626065555/job116065415923 PASSED. Both preserve VM13c1fcd9-31d7-4836-8774-076f365de699, Python3.12.10, point-in-time document/preferences/HKCU/machine identity. Save restored originaldark42/Hide0/doc37414..., Finish restoredlaterlight84/Hide1/doc280D... . Full source verified before owned source unregister; no clone/newGUID. Same outerhost only, freshhostunproved. Portablecredential native test38627404258/job116069950419 PASS.
