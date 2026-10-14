@@ -10,6 +10,8 @@ function Assert-Refused([scriptblock]$Action){
 }
 try {
     $env:GITHUB_ACTIONS='true';$env:DEVBOX_ISOLATED_TEST='1';$env:GITHUB_EVENT_NAME='workflow_dispatch';$env:GITHUB_REPOSITORY='fixture/repo';$env:RESTIC_PASSWORD='fixture-encryption-key-only';$env:GH_TOKEN='fixture-token-only'
+    if(-not (Get-Command Publish-WindowsStateRoundtrip -ErrorAction SilentlyContinue)){throw 'ASSERT: whole-VM encrypted publisher missing'}
+    if(-not (Get-Command Restore-WindowsStateRoundtrip -ErrorAction SilentlyContinue)){throw 'ASSERT: exact-generation fresh-host restore missing'}
     $id=[guid]'11111111-1111-4111-8111-111111111111'
     $one=Get-WindowsStatePortableFixtureCredential -VmId $id
     $two=Get-WindowsStatePortableFixtureCredential -VmId $id
@@ -27,5 +29,7 @@ try {
         finally{[Environment]::SetEnvironmentVariable($key,$value)}
     }
     Assert-Refused {Get-WindowsStatePortableFixtureCredential -VmId ([guid]::Empty)}
+    foreach($foreign in @('C:/Windows','D:/user','E:/unowned')){Assert-Refused {Publish-WindowsStateRoundtrip -Root $foreign -VmId $id -Checkpoint $null -Baseline $null}}
+    Assert-Refused {Restore-WindowsStateRoundtrip -ExpectedGeneration 'production'}
     Write-Output 'PORTABLE FIXTURE CREDENTIAL DETERMINISM + DOMAIN/CONTEXT REFUSALS: PASS'
 } finally {foreach($key in $keys){[Environment]::SetEnvironmentVariable($key,$previous[$key])}}
