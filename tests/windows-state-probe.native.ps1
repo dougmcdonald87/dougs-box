@@ -48,9 +48,9 @@ try {
         if($identitySnapshot){Remove-VMSnapshot -VMSnapshot $identitySnapshot -Confirm:$false -ErrorAction Stop}
         Set-VM -VM (Get-VM -Id $id) -CheckpointType $priorCheckpointType -ErrorAction Stop
     }
-    $mergeDeadline=[DateTime]::UtcNow.AddMinutes(1)
-    while([IO.Path]::GetFullPath((Get-VMHardDiskDrive -VM (Get-VM -Id $id))[0].Path) -ine [IO.Path]::GetFullPath($disk.diskPath) -and [DateTime]::UtcNow -lt $mergeDeadline){Start-Sleep -Seconds 2}
-    if([IO.Path]::GetFullPath((Get-VMHardDiskDrive -VM (Get-VM -Id $id))[0].Path) -ine [IO.Path]::GetFullPath($disk.diskPath)){throw 'Owned empty identity checkpoint merge did not finish'}
+    $postCheckpointPath=(Get-VMHardDiskDrive -VM (Get-VM -Id $id))[0].Path
+    $postCheckpointDisk=Get-VHD -Path $postCheckpointPath -ErrorAction Stop
+    Write-Output ('NATIVE EMPTY POST-CHECKPOINT DISK OBSERVATIONS: '+([pscustomobject]@{attachedPath=$postCheckpointPath;type=$postCheckpointDisk.VhdType.ToString();parent=$postCheckpointDisk.ParentPath;originalFileExists=(Test-Path -LiteralPath $disk.diskPath)}|ConvertTo-Json -Compress))
     # Actual empty same-ID import after positively owned source unregister.
     $ownedEmpty=Get-VM -Id $id -ErrorAction Stop
     if($ownedEmpty.Name -cne $name -or $ownedEmpty.State -ne 'Off' -or -not (Test-WindowsStateProbeVmPath -Root $root -VmName $name -VmPath $ownedEmpty.Path)){throw 'Empty import source owner mismatch'}
@@ -62,11 +62,22 @@ try {
     $emptyImported=Import-VM -CompatibilityReport $emptyReport -ErrorAction Stop
     if($emptyImported.Id -ne $id -or -not (Test-WindowsStateProbeVmPath -Root $root -VmName $name -VmPath $emptyImported.Path)){throw 'Actual empty import VM ID/path changed'}
     Write-Output ('NATIVE EMPTY ACTUAL SAME-ID COPY IMPORT: '+([pscustomobject]@{sourceVmId=$id.ToString();configurationFilenameId=$configurationId.ToString();parsedVmId=$emptyReport.VM.Id.ToString();importedVmId=$emptyImported.Id.ToString();vmPath=$emptyImported.Path}|ConvertTo-Json -Compress))
-    # Restore the original owned RAW test disk required by the installation guard.
-    foreach($attached in @(Get-VMHardDiskDrive -VM $emptyImported)){
-        if(-not [IO.Path]::GetFullPath($attached.Path).StartsWith([IO.Path]::GetFullPath($emptyDisks)+'\',[StringComparison]::OrdinalIgnoreCase)){throw 'Empty imported attachment outside owned import directory'}
-        Remove-VMHardDiskDrive -VMHardDiskDrive $attached -ErrorAction Stop
+    # This subprobe is still RAW/empty (no Windows image). Preserve its old canonical
+    # file and copy the verified standalone RAW export to the installer contract path.
+    $attached=@(Get-VMHardDiskDrive -VM $emptyImported)
+    if($attached.Count -ne 1){throw 'Empty imported disk count mismatch'}
+    $rawSource=[IO.Path]::GetFullPath($attached[0].Path)
+    if(-not $rawSource.StartsWith([IO.Path]::GetFullPath($emptyDisks)+'\',[StringComparison]::OrdinalIgnoreCase)){throw 'Empty imported attachment outside owned import directory'}
+    $rawDisk=Get-VHD -Path $rawSource -ErrorAction Stop
+    if($rawDisk.VhdType -ne 'Dynamic' -or $rawDisk.Size -ne 64GB -or $rawDisk.ParentPath){throw 'Empty imported RAW disk must be standalone dynamic64GiB'}
+    Remove-VMHardDiskDrive -VMHardDiskDrive $attached[0] -ErrorAction Stop
+    if(Test-Path -LiteralPath $disk.diskPath){
+        $preservedRaw=Join-Path $root 'pre-identity-original.vhdx'
+        if(Test-Path -LiteralPath $preservedRaw){throw 'Existing raw preservation file refused'}
+        Move-Item -LiteralPath $disk.diskPath -Destination $preservedRaw -ErrorAction Stop
     }
+    Copy-Item -LiteralPath $rawSource -Destination $disk.diskPath -ErrorAction Stop
+    if((Get-FileHash -LiteralPath $rawSource -Algorithm SHA256).Hash -cne (Get-FileHash -LiteralPath $disk.diskPath -Algorithm SHA256).Hash){throw 'Canonical RAW disk copy hash mismatch'}
     Add-VMHardDiskDrive -VM $emptyImported -ControllerType SCSI -ControllerNumber 0 -ControllerLocation 0 -Path $disk.diskPath -ErrorAction Stop
     Set-VM -VM $emptyImported -CheckpointType $priorCheckpointType -ErrorAction Stop
     if($env:WINDOWS_STATE_MEDIA_URI){
