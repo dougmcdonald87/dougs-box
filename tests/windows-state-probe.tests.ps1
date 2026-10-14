@@ -39,3 +39,8 @@ try {
     Remove-Item $temp -Force
 }
 Write-Output 'WINDOWS HOME PROBE POLICY: 12 safety cases and hardware contract PASS'
+
+if(-not (Test-WindowsStateProbeVmPath -Root $root -VmName $name -VmPath ($root+'/'+$name))){throw 'Hyper-V name subdirectory refused'}
+if(Test-WindowsStateProbeVmPath -Root $root -VmName $name -VmPath ($root+'/../unrelated')){throw 'Escaped VM path accepted'}
+if(Test-WindowsStateProbeVmPath -Root $root -VmName $name -VmPath ($root+'/unrelated')){throw 'Wrong VM directory accepted'}
+Write-Output 'HYPER-V OWNED NAME SUBDIRECTORY BOUNDARY: PASS'

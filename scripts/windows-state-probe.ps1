@@ -67,6 +67,15 @@ function Test-WindowsStateProbeHost {
     return $result
 }
 
+function Test-WindowsStateProbeVmPath {
+    param([Parameter(Mandatory)][string]$Root,
+          [Parameter(Mandatory)][string]$VmName,
+          [Parameter(Mandatory)][string]$VmPath)
+    $base=$Root.Replace('\','/').TrimEnd('/')
+    $actual=$VmPath.Replace('\','/').TrimEnd('/')
+    return ($actual -ieq $base -or $actual -ieq ($base+'/'+$VmName))
+}
+
 function New-WindowsStateProbe {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Root,
@@ -98,7 +107,7 @@ function Remove-WindowsStateProbe {
     if($marker.schema -ne 1 -or $marker.root -cne $policy.root -or $marker.name -cne $VmName -or $marker.status -ne 'created'){throw 'Ownership marker mismatch.'}
     $id=[guid]::Parse($marker.vmId)
     $vm=Get-VM -Id $id -ErrorAction Stop
-    if($vm.Name -cne $VmName -or $vm.Path.Replace('\','/').TrimEnd('/') -ine $policy.root){throw 'VM identity/path mismatch; cleanup refused.'}
+    if($vm.Name -cne $VmName -or -not (Test-WindowsStateProbeVmPath -Root $policy.root -VmName $VmName -VmPath $vm.Path)){throw 'VM identity/path mismatch; cleanup refused.'}
     # Keep files as evidence; unregister only the verified owned disposable VM.
     if($vm.State -ne 'Off'){Stop-VM -VM $vm -TurnOff -Force -ErrorAction Stop}
     Remove-VM -VM $vm -Force -ErrorAction Stop

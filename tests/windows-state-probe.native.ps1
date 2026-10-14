@@ -13,7 +13,7 @@ try {
     Start-Sleep -Seconds 3
     $vm=Get-VM -Id $id -ErrorAction Stop
     if($vm.State -ne 'Running'){throw 'Owned empty VM did not start'}
-    Write-Output ('NATIVE OWNED EMPTY VM RUNNING: '+$id)
+    Write-Output ('NATIVE OWNED EMPTY VM RUNNING: '+$id+' path='+$vm.Path)
 } finally {
     if($owner){Remove-WindowsStateProbe -Root $root -VmName $name}
 }
