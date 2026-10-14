@@ -1,4 +1,4 @@
-"""Tiny manual draft transport diagnostic; never publishes a checkpoint."""
+"""Tiny manual transport diagnostic; publishes only random non-user probe data."""
 import os,pathlib,sys,tempfile,uuid,json
 sys.path.insert(0,str(pathlib.Path(__file__).resolve().parents[1]/'scripts'))
 from cloud_checkpoint import GitHubRemote,CheckpointError
@@ -13,4 +13,5 @@ with tempfile.TemporaryDirectory() as directory:
     remote.upload(tag,sample)
     output=root/'readback.bin';remote.download(tag,sample.name,output,32)
     if output.read_bytes()!=sample.read_bytes():raise CheckpointError('Tiny draft readback mismatch')
-print(json.dumps({'transportProbe':True,'draft':True,'tag':tag,'createUploadReadback':True,'publishedCheckpoint':False}),flush=True)
+remote.finish(tag)
+print(json.dumps({'transportProbe':True,'draft':False,'tag':tag,'createUploadReadbackPublish':True,'publishedCheckpoint':False}),flush=True)
