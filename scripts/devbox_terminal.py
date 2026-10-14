@@ -42,7 +42,7 @@ def execute(manifest, password, command, timeout=300):
     try:
         channel = client.get_transport().open_session(timeout=15)
         channel.exec_command('powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand ' + encoded)
-        deadline = time.monotonic() + timeout
+        deadline = time.monotonic() + timeout if timeout > 0 else None
         while True:
             while channel.recv_ready():
                 sys.stdout.write(channel.recv(32768).decode('utf-8', errors='replace'))
@@ -52,7 +52,7 @@ def execute(manifest, password, command, timeout=300):
                 sys.stderr.flush()
             if channel.exit_status_ready() and not channel.recv_ready() and not channel.recv_stderr_ready():
                 return channel.recv_exit_status()
-            if time.monotonic() >= deadline:
+            if deadline is not None and time.monotonic() >= deadline:
                 raise TimeoutError('Command exceeded the client wait limit; remote process status is unknown')
             time.sleep(0.05)
     finally:
@@ -62,7 +62,7 @@ def execute(manifest, password, command, timeout=300):
 def main():
     parser = argparse.ArgumentParser(description='Run Windows PowerShell over the existing tailnet')
     parser.add_argument('--state', default='/run/devbox-control')
-    parser.add_argument('--timeout', type=int, default=300)
+    parser.add_argument('--timeout', type=int, default=300, help='Command wait in seconds; 0 waits without a client deadline')
     parser.add_argument('command', nargs='?')
     args = parser.parse_args()
     state = Path(args.state)

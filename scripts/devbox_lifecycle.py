@@ -143,8 +143,8 @@ def safe_control(action, expected_run_id, state=Path('/run/devbox-control')):
     if executable is None:
         raise DevBoxError('Run save/stop inside the authenticated Codex relay terminal. No local devbox client is installed here.')
     try:
-        result = subprocess.run([executable, '--state', str(state), '--timeout', '330',
-                                 control_command(action)], timeout=350, check=False)
+        result = subprocess.run([executable, '--state', str(state), '--timeout', '0',
+                                 control_command(action)], timeout=None, check=False)
     except (OSError, subprocess.TimeoutExpired):
         raise DevBoxError('Control result UNKNOWN. Inspect the run and backup receipt; no automatic retry or cancellation.') from None
     if result.returncode != 0:

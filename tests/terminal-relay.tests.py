@@ -17,6 +17,19 @@ spec.loader.exec_module(relay)
 
 
 class RelayBoundaryTests(unittest.TestCase):
+    def test_zero_timeout_waits_past_five_minutes_for_remote_result(self):
+        import devbox_terminal
+        from unittest.mock import MagicMock
+        client = MagicMock()
+        channel = client.get_transport.return_value.open_session.return_value
+        channel.recv_ready.return_value = False
+        channel.recv_stderr_ready.return_value = False
+        channel.exit_status_ready.side_effect = [False, True]
+        channel.recv_exit_status.return_value = 0
+        with patch.object(devbox_terminal, 'connect', return_value=client), patch.object(devbox_terminal.time, 'monotonic', side_effect=[0, 400]), patch.object(devbox_terminal.time, 'sleep'):
+            self.assertEqual(devbox_terminal.execute({}, 'test-only', 'noop', timeout=0), 0)
+        client.close.assert_called_once()
+
     def test_invalid_artifact_is_rejected_without_retry(self):
         artifact = {'id':7, 'name':'devbox-terminal-123-1','expired':False}
         archive = io.BytesIO()
