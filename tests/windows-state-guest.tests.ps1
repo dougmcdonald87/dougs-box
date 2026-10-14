@@ -26,3 +26,11 @@ foreach($name in @('Get-WindowsStateFixture','Install-WindowsStateFixture')){
     catch {if($_.Exception.Message -notmatch '^Only an open PowerShell Direct guest session'){throw}}
 }
 Write-Output 'FIXTURE READ/WRITE REJECT HOST CONTEXT: PASS'
+
+$priorInstall=$env:WINDOWS_STATE_INSTALL_IMAGE;$priorMedia=$env:WINDOWS_STATE_MEDIA_URI;$priorFixture=$env:WINDOWS_STATE_FIXTURE
+try {
+    $env:WINDOWS_STATE_INSTALL_IMAGE='true';$env:WINDOWS_STATE_MEDIA_URI=$null
+    try {& (Join-Path $PSScriptRoot 'windows-state-probe.native.ps1');throw 'Missing image URI silently downgraded to empty VM test'}
+    catch {if($_.Exception.Message -notmatch '^Native image test requires an explicit official media URI'){throw}}
+} finally {$env:WINDOWS_STATE_INSTALL_IMAGE=$priorInstall;$env:WINDOWS_STATE_MEDIA_URI=$priorMedia;$env:WINDOWS_STATE_FIXTURE=$priorFixture}
+Write-Output 'REQUESTED IMAGE TEST CANNOT SILENTLY DOWNGRADE WITHOUT MEDIA: PASS'

@@ -1,5 +1,7 @@
 $ErrorActionPreference='Stop'
 if($env:GITHUB_ACTIONS -ne 'true' -or $env:DEVBOX_ISOLATED_TEST -ne '1'){throw 'Disposable CI runner only.'}
+if($env:WINDOWS_STATE_INSTALL_IMAGE -eq 'true' -and -not $env:WINDOWS_STATE_MEDIA_URI){throw 'Native image test requires an explicit official media URI.'}
+if($env:WINDOWS_STATE_FIXTURE -eq 'true' -and $env:WINDOWS_STATE_INSTALL_IMAGE -ne 'true'){throw 'Native fixture test requires image installation.'}
 . (Join-Path $PSScriptRoot '../scripts/windows-state-probe.ps1')
 & (Join-Path $PSScriptRoot '../scripts/bootstrap.ps1') -CloudCandidate
 if(-not $? -or -not (Test-Path 'E:/DevBox/Control/session.json')){throw 'Owned E bootstrap failed'}
