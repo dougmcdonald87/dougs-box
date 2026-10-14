@@ -96,6 +96,64 @@ function New-WindowsStateProbe {
     return $owner
 }
 
+function Test-WindowsStateGuestDiskPolicy {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Root,
+          [Parameter(Mandatory)][string]$VmName,
+          [Parameter(Mandatory)][hashtable]$Facts)
+    $dummy=@{FreeBytes=100GB;AvailableMemoryBytes=12GB;HyperVReady=$true;ExistingVm=$false;RootOccupied=$false}
+    $policy=Test-WindowsStateProbePolicy -Root $Root -VmName $VmName -Facts $dummy
+    $reason=$policy.reason
+    if(-not $reason){
+        foreach($key in @('MarkerSchema','MarkerRoot','MarkerName','MarkerId','MarkerStatus','VmId','VmName','VmPath','State','Generation','DiskCount','DiskExists','RootReparse','FreeBytes')){
+            if(-not $Facts.ContainsKey($key)){$reason='Guest disk observations incomplete.';break}
+        }
+    }
+    if(-not $reason){
+        $ownerId=[guid]::Empty;$actualId=[guid]::Empty
+        if($Facts.MarkerSchema -ne 1 -or $Facts.MarkerRoot -cne $policy.root -or $Facts.MarkerName -cne $VmName -or $Facts.MarkerStatus -cne 'created'){$reason='Guest disk ownership marker mismatch.'}
+        elseif(-not [guid]::TryParse([string]$Facts.MarkerId,[ref]$ownerId) -or -not [guid]::TryParse([string]$Facts.VmId,[ref]$actualId) -or $ownerId -eq [guid]::Empty -or $ownerId -ne $actualId){$reason='Guest disk VM identity mismatch.'}
+        elseif($Facts.VmName -cne $VmName -or -not (Test-WindowsStateProbeVmPath -Root $policy.root -VmName $VmName -VmPath $Facts.VmPath)){$reason='Guest disk VM name/path mismatch.'}
+        elseif($Facts.State -cne 'Off' -or $Facts.Generation -ne 2){$reason='Guest disk requires an off Generation 2 VM.'}
+        elseif($Facts.DiskCount -ne 0 -or $Facts.DiskExists -isnot [bool] -or $Facts.DiskExists){$reason='Existing guest disk must not be replaced.'}
+        elseif($Facts.RootReparse -isnot [bool] -or $Facts.RootReparse){$reason='Guest disk reparse ancestry refused.'}
+        elseif($Facts.FreeBytes -isnot [ValueType] -or $Facts.FreeBytes -lt 80GB){$reason='Guest disk requires 80 GiB free E space.'}
+    }
+    [pscustomobject]@{eligible=([string]::IsNullOrEmpty($reason));reason=$reason;diskPath=($policy.root+'/windows-home.vhdx');diskCapacityBytes=64GB}
+}
+
+function New-WindowsStateGuestDisk {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Root,
+          [Parameter(Mandatory)][string]$VmName)
+    $dummy=@{FreeBytes=100GB;AvailableMemoryBytes=12GB;HyperVReady=$true;ExistingVm=$false;RootOccupied=$false}
+    $base=Test-WindowsStateProbePolicy -Root $Root -VmName $VmName -Facts $dummy
+    if(-not $base.eligible){throw $base.reason}
+    $marker=Get-Content -LiteralPath (Join-Path $Root 'probe-owner.json') -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+    if($marker.schema -ne 1 -or $marker.root -cne $base.root -or $marker.name -cne $VmName -or $marker.status -cne 'created'){throw 'Guest disk ownership marker mismatch.'}
+    if(-not $IsWindows){throw 'Guest disk creation requires native Windows PowerShell 7.'}
+    $vm=Get-VM -Id ([guid]::Parse($marker.vmId)) -ErrorAction Stop
+    $reparse=$false;$ancestor=$Root
+    while($ancestor){
+        if(Test-Path -LiteralPath $ancestor){
+            if(((Get-Item -LiteralPath $ancestor -Force -ErrorAction Stop).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){$reparse=$true}
+        }
+        $ancestor=Split-Path -Parent $ancestor
+    }
+    $diskPath=$base.root+'/windows-home.vhdx'
+    $facts=@{MarkerSchema=$marker.schema;MarkerRoot=$marker.root;MarkerName=$marker.name;MarkerId=$marker.vmId;MarkerStatus=$marker.status;VmId=$vm.Id.ToString();VmName=$vm.Name;VmPath=$vm.Path;State=$vm.State.ToString();Generation=$vm.Generation;DiskCount=@(Get-VMHardDiskDrive -VM $vm -ErrorAction Stop).Count;DiskExists=(Test-Path -LiteralPath $diskPath);RootReparse=$reparse;FreeBytes=(Get-PSDrive E -PSProvider FileSystem -ErrorAction Stop).Free}
+    $policy=Test-WindowsStateGuestDiskPolicy -Root $Root -VmName $VmName -Facts $facts
+    if(-not $policy.eligible){throw $policy.reason}
+    # Never mount or format a host disk. New-VHD refuses an existing destination.
+    $disk=New-VHD -Path $policy.diskPath -SizeBytes $policy.diskCapacityBytes -Dynamic -ErrorAction Stop
+    if($disk.VhdType.ToString() -ne 'Dynamic' -or $disk.Size -ne 64GB){throw 'New guest disk verification failed; preserve it for diagnosis.'}
+    Add-VMHardDiskDrive -VM $vm -Path $policy.diskPath -ControllerType SCSI -ControllerNumber 0 -ControllerLocation 0 -ErrorAction Stop
+    Set-VMFirmware -VM $vm -EnableSecureBoot On -SecureBootTemplate MicrosoftWindows -ErrorAction Stop
+    $attached=@(Get-VMHardDiskDrive -VM $vm -ErrorAction Stop)
+    if($attached.Count -ne 1 -or $attached[0].Path.Replace('\','/') -ine $policy.diskPath){throw 'Guest disk attachment mismatch.'}
+    [pscustomobject]@{vmId=$vm.Id.ToString();diskPath=$policy.diskPath;capacityBytes=$disk.Size;fileBytes=$disk.FileSize;type=$disk.VhdType.ToString();secureBoot=(Get-VMFirmware -VM $vm -ErrorAction Stop).SecureBoot.ToString()}
+}
+
 function Remove-WindowsStateProbe {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Root,

@@ -4,6 +4,7 @@ on:
     paths:
       - 'scripts/windows-state-probe.ps1'
       - 'tests/windows-state-probe*'
+      - 'tests/windows-state-disk*'
       - '.github/workflows/windows-state-probe-validate.yml'
   workflow_dispatch:
 permissions:
@@ -21,6 +22,9 @@ jobs:
       - name: Test ownership refusals and Windows Home hardware policy
         shell: pwsh
         run: ./tests/windows-state-probe.tests.ps1
+      - name: Test guest disk ownership and refusal boundaries
+        shell: pwsh
+        run: ./tests/windows-state-disk.tests.ps1
       - name: Start and remove only the owned empty VM on disposable Windows
         shell: pwsh
         run: ./tests/windows-state-probe.native.ps1
