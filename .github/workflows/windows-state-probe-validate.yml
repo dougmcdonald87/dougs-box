@@ -27,6 +27,10 @@ on:
         type: choice
         options: [probe, publish, restore, transport-probe]
         default: probe
+      transport_full_part:
+        description: 'Use a full512MiB random non-user probe payload instead of32bytes'
+        type: boolean
+        default: false
       expected_generation:
         description: 'Exact previously accepted CI generation; required only for fresh restore'
         type: string
@@ -163,10 +167,11 @@ jobs:
     environment: devbox
     permissions:
       contents: write
-    timeout-minutes: 5
+    timeout-minutes: 15
     env:
       DEVBOX_ISOLATED_TEST: '1'
       GH_TOKEN: ${{ github.token }}
+      WINDOWS_STATE_TRANSPORT_FULL_PART: ${{ inputs.transport_full_part }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:

@@ -76,6 +76,7 @@ function Publish-WindowsStateRoundtrip {
     [IO.Compression.ZipFile]::CreateFromDirectory($repo,$archive,[IO.Compression.CompressionLevel]::NoCompression,$false)
     $archiveBytes=(Get-Item -LiteralPath $archive).Length
     if($archiveBytes -gt 8GB -or (Get-ChildItem -LiteralPath $repo -File -Recurse|Measure-Object Length -Sum).Sum -gt 8GB){throw 'Whole Windows encrypted package exceeds existing8GiB transport.'}
+    Write-Host ('NATIVE WHOLE WINDOWS ENCRYPTED PACKAGE READY: '+([pscustomobject]@{vmId=$VmId.ToString();archiveBytes=$archiveBytes;snapshotId=$snapshot;receiptId=$receiptId;published=$false}|ConvertTo-Json -Compress))
     $raw=& python (Join-Path $PSScriptRoot 'cloud_checkpoint.py') publish --repository $env:GITHUB_REPOSITORY --channel $channel --archive $archive --restic-exe $restic --snapshot-id $snapshot --receipt-id $receiptId
     if($LASTEXITCODE -ne 0){throw 'Encrypted whole Windows publication/readback failed; no accepted Finish receipt.'}
     $accepted=($raw -join "`n")|ConvertFrom-Json
