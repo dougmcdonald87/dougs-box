@@ -25,3 +25,41 @@ class ExactGenerationReader(GitHubRemote):
     def create_draft(self,tag):raise CheckpointError('Read-only recovery cannot create releases')
     def upload(self,tag,path):raise CheckpointError('Read-only recovery cannot upload')
     def finish(self,tag):raise CheckpointError('Read-only recovery cannot publish')
+
+def validate_transfer_record(value,expected_generation,current_host,current_run):
+    """Bind authenticated fixture metadata to its exact producer and a fresh host."""
+    import uuid
+    def guid(item):
+        try:
+            parsed=uuid.UUID(item)
+            if not parsed.int or str(parsed)!=item.lower():raise ValueError()
+            return str(parsed)
+        except (ValueError,TypeError,AttributeError):raise CheckpointError('Invalid transfer host/VM identity') from None
+    fields={'schema','producer_run','producer_attempt','producer_host','source_sha','vm_id','vm_name','root','generation','manifest_sha256','baseline'}
+    if not isinstance(value,dict) or set(value)!=fields or type(value['schema']) is not int or value['schema']!=1:
+        raise CheckpointError('Invalid transfer record schema')
+    match=TAG.fullmatch(expected_generation) if isinstance(expected_generation,str) else None
+    source=re.fullmatch(r'ci-([1-9]\d*)-([1-9]\d*)',match.group(1)) if match else None
+    if not source or value['producer_run']!=source.group(1) or value['producer_attempt']!=source.group(2):
+        raise CheckpointError('Transfer producer generation mismatch')
+    if not isinstance(current_run,str) or not re.fullmatch(r'[1-9]\d*',current_run) or current_run==value['producer_run']:
+        raise CheckpointError('Transfer consumer run must be distinct')
+    if guid(value['producer_host'])==guid(current_host):raise CheckpointError('Transfer consumer host must be distinct')
+    guid(value['vm_id'])
+    suffix=value['producer_run']+'-'+value['producer_attempt']
+    if value['vm_name']!='DevBoxWindowsState-'+suffix or value['root']!='E:/DevBox/Tools/WindowsStateProbe/probe-'+suffix:
+        raise CheckpointError('Transfer owner scope mismatch')
+    for field,pattern in [('generation',r'finish-[0-9a-f]{32}'),('manifest_sha256',r'[0-9a-f]{64}'),('source_sha',r'[0-9a-f]{40}')]:
+        if not isinstance(value[field],str) or not re.fullmatch(pattern,value[field]):raise CheckpointError('Invalid transfer generation/digest')
+    baseline=value['baseline']
+    if not isinstance(baseline,dict) or set(baseline)!={'machineName','machineGuid','programPath','programVersion','documentSha256','preferences','windowsHideFileExt'}:
+        raise CheckpointError('Invalid transfer baseline schema')
+    guid(baseline['machineGuid'])
+    if not isinstance(baseline['machineName'],str) or not re.fullmatch(r'[A-Za-z0-9-]{1,15}',baseline['machineName']):raise CheckpointError('Invalid fixture machine name')
+    if baseline['programPath']!=r'C:\DevBoxFixture\Python312\python.exe' or baseline['programVersion']!='Python 3.12.10':raise CheckpointError('Unexpected fixture executable')
+    if not isinstance(baseline['documentSha256'],str) or not re.fullmatch(r'[0-9A-Fa-f]{64}',baseline['documentSha256']):raise CheckpointError('Invalid fixture document digest')
+    if type(baseline['windowsHideFileExt']) is not int or baseline['windowsHideFileExt'] not in (0,1):raise CheckpointError('Invalid fixture Windows preference')
+    prefs=baseline['preferences']
+    if not isinstance(prefs,dict) or set(prefs)!={'theme','volume'} or prefs['theme'] not in ('light','dark') or type(prefs['volume']) is not int or not 0<=prefs['volume']<=100:
+        raise CheckpointError('Invalid fixture application preferences')
+    return value
