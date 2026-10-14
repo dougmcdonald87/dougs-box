@@ -36,6 +36,14 @@ class CheckpointManifestTests(unittest.TestCase):
         except (module.ManifestError,TypeError):
             pass
         self.assertTrue(accepted,'Explicit whole-VM production data-consistent capture must be supported')
+    def test_crash_and_saved_capture_refused(self):
+        for capture in ('CaptureCrashConsistentState','CaptureSavedState','Unknown'):
+            with self.subTest(capture=capture):
+                with self.assertRaises(module.ManifestError):
+                    module.consistency_policy('save','Running',production_only=True,capture_state=capture)
+    def test_data_consistent_capture_requires_production_only(self):
+        with self.assertRaises(module.ManifestError):
+            module.consistency_policy('save','Running',capture_state='CaptureDataConsistentState')
     def test_running_finish_refused(self):
         with self.assertRaises(module.ManifestError):module.consistency_policy('finish','Running',shutdown_verified=True)
     def test_unclean_off_finish_refused(self):

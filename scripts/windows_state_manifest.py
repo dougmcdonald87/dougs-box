@@ -16,8 +16,11 @@ def _guid(value):
         return str(uuid.UUID(value))
     except (ValueError,AttributeError):raise ManifestError('Invalid VM/checkpoint identity') from None
 
-def consistency_policy(mode,state,production_only=False,checkpoint_id=None,shutdown_verified=False):
+def consistency_policy(mode,state,production_only=False,checkpoint_id=None,shutdown_verified=False,capture_state=None):
     if mode=='finish' and state=='Off' and shutdown_verified is True:return 'clean-shutdown'
+    if capture_state is not None:
+        if mode=='save' and state=='Running' and production_only is True and capture_state=='CaptureDataConsistentState':return 'data-consistent-export'
+        raise ManifestError('Unsupported live capture consistency refused')
     if mode=='save' and state=='Running' and production_only is True and checkpoint_id:
         _guid(checkpoint_id)
         return 'production-checkpoint'
@@ -66,8 +69,8 @@ def _structure(value,expected_vm_id,supported_versions):
     version=value['configuration_version']
     if not isinstance(version,str) or not re.fullmatch(r'\d+\.\d+',version) or version not in supported_versions:
         raise ManifestError('Unsupported VM configuration version')
-    pairs={'save':'production-checkpoint','finish':'clean-shutdown'}
-    if value['mode'] not in pairs or value['consistency']!=pairs[value['mode']]:raise ManifestError('Consistency mode mismatch')
+    pairs={'save':{'production-checkpoint','data-consistent-export'},'finish':{'clean-shutdown'}}
+    if value['mode'] not in pairs or value['consistency'] not in pairs[value['mode']]:raise ManifestError('Consistency mode mismatch')
     if not isinstance(value['generation'],str) or not re.fullmatch(value['mode']+r'-[0-9a-f]{32}',value['generation']):
         raise ManifestError('Generation identity mismatch')
     if not isinstance(value['files'],list) or not 0<len(value['files'])<=10000:raise ManifestError('Invalid file inventory')
@@ -126,7 +129,7 @@ if __name__=='__main__':
     if args.action=='create':
         destination=Path(args.manifest)
         if destination.exists():raise ManifestError('Existing immutable manifest must not be replaced')
-        consistency=consistency_policy(metadata['mode'],metadata['state'],metadata.get('production_only',False),metadata.get('checkpoint_id'),metadata.get('shutdown_verified',False))
+        consistency=consistency_policy(metadata['mode'],metadata['state'],metadata.get('production_only',False),metadata.get('checkpoint_id'),metadata.get('shutdown_verified',False),metadata.get('capture_state'))
         value=make_manifest(args.root,metadata['vm_id'],metadata['vm_name'],metadata['configuration_version'],metadata['mode'],consistency,metadata['disks'])
         if 'generation' in metadata:
             value['generation']=metadata['generation']

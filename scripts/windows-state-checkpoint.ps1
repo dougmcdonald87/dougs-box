@@ -87,12 +87,8 @@ function Export-WindowsStateCheckpoint {
         if($Mode -eq 'save'){
             Set-VM -VM $vm -CheckpointType ProductionOnly -ErrorAction Stop
             if((Get-VM -Id $VmId).CheckpointType -ne 'ProductionOnly'){throw 'Production-only checkpoint configuration refused.'}
-            Checkpoint-VM -VM $vm -SnapshotName $generation -ErrorAction Stop
-            $snapshots=@(Get-VMSnapshot -VM $vm -Name $generation -ErrorAction Stop)
-            if($snapshots.Count -ne 1 -or $snapshots[0].VMId -ne $VmId){throw 'Owned production checkpoint identity mismatch.'}
-            $snapshot=$snapshots[0]
-            Export-VMSnapshot -VMSnapshot $snapshot -Path $payload -ErrorAction Stop | Out-Null
-            $state='Running';$production=$true;$shutdown=$false;$checkpointId=$snapshot.Id.ToString()
+            Export-VM -VM $vm -Path $payload -CaptureLiveState CaptureDataConsistentState -ErrorAction Stop | Out-Null
+            $state='Running';$production=$true;$shutdown=$false;$checkpointId=$null
         } else {
             Stop-VM -VM $vm -ErrorAction Stop
             $deadline=[DateTime]::UtcNow.AddMinutes(2)
@@ -102,7 +98,7 @@ function Export-WindowsStateCheckpoint {
             $state='Off';$production=$false;$shutdown=$true;$checkpointId=$null
         }
         $disks=@(Get-WindowsStateExportDiskMetadata -ExportPath $payload)
-        $metadata=[ordered]@{vm_id=$VmId.ToString();vm_name=$owner.name;configuration_version=$vm.Version.ToString();mode=$Mode;state=$state;production_only=$production;checkpoint_id=$checkpointId;shutdown_verified=$shutdown;disks=$disks;generation=$generation}
+        $metadata=[ordered]@{vm_id=$VmId.ToString();vm_name=$owner.name;configuration_version=$vm.Version.ToString();mode=$Mode;state=$state;production_only=$production;checkpoint_id=$checkpointId;shutdown_verified=$shutdown;capture_state=$(if($Mode -eq 'save'){'CaptureDataConsistentState'}else{$null});disks=$disks;generation=$generation}
         $metadataPath=Join-Path $directory 'metadata.json';$manifest=Join-Path $directory 'manifest.json'
         $metadata | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $metadataPath -Encoding utf8
         & python (Join-Path $PSScriptRoot 'windows_state_manifest.py') create --root $payload --metadata $metadataPath --manifest $manifest | ForEach-Object {Write-Host $_}
