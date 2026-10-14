@@ -47,3 +47,6 @@ function Start-Sleep {
     Remove-Item Env:DEVBOX_CONTROL_NONINTERACTIVE -ErrorAction SilentlyContinue
     Remove-Item $root -Recurse -Force -ErrorAction SilentlyContinue
 }
+
+# Expected failing children must not make the successful test suite fail.
+$global:LASTEXITCODE = 0

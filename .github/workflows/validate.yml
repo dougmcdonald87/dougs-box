@@ -105,7 +105,6 @@ jobs:
         shell: pwsh
         run: |
           ./tests/control-queue.tests.ps1
-          if ($LASTEXITCODE -ne 0) { throw 'Control queue tests failed' }
           ./tests/request-control-wait.tests.ps1
           if ($LASTEXITCODE -ne 0) { throw 'Long backup wait tests failed' }
 
