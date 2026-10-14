@@ -6,6 +6,8 @@ on:
       - 'tests/windows-state-probe*'
       - 'tests/windows-state-disk*'
       - 'tests/windows-state-install*'
+      - 'tests/windows-state-guest*'
+      - 'scripts/windows-state-fixture.ps1'
       - 'tests/reserved-variable.tests.ps1'
       - '.github/workflows/windows-state-probe-validate.yml'
   workflow_dispatch:
@@ -49,6 +51,9 @@ jobs:
       - name: Refuse host and existing disks before Windows installation
         shell: pwsh
         run: ./tests/windows-state-install.tests.ps1
+      - name: Refuse forged host sessions before guest fixture writes
+        shell: pwsh
+        run: ./tests/windows-state-guest.tests.ps1
       - name: Start and remove only the owned empty VM on disposable Windows
         shell: pwsh
         run: ./tests/windows-state-probe.native.ps1
