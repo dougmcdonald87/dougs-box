@@ -25,7 +25,7 @@ function Measure-WindowsStateExportCapacity {
     foreach($path in @($export,$repo,$archive,$tools)){if(Test-Path -LiteralPath $path){throw 'Capacity measurement refuses existing output.'}}
     if((Get-PSDrive E).Free -lt ($vhd.FileSize*2+16GB)){throw 'Capacity export/packing free-space headroom insufficient.'}
     New-Item -ItemType Directory -Path $export | Out-Null
-    Export-VM -VM $vm -Path $export -ErrorAction Stop
+    Export-VM -VM $vm -Path $export -ErrorAction Stop | Out-Null
     $files=@(Get-ChildItem -LiteralPath $export -File -Recurse)
     if(-not ($files | Where-Object {$_.Extension -eq '.vhdx'}) -or -not ($files | Where-Object {$_.Extension -eq '.vmcx'})){throw 'Whole guest export disk/configuration missing.'}
     foreach($file in $files){if($file.Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Export reparse file refused.'}}
@@ -50,7 +50,7 @@ function Measure-WindowsStateExportCapacity {
         $repositoryBytes=(Get-ChildItem -LiteralPath $repo -File -Recurse | Measure-Object -Property Length -Sum).Sum
         $fits=$bytes -le 8GB -and $repositoryBytes -le 8GB
         if($fits){
-            & python -c "import sys;sys.path.insert(0,sys.argv[1]);from cloud_checkpoint import archive_check;archive_check(sys.argv[2]);print('EXISTING 8GiB ARCHIVE STRUCTURE GUARD: PASS')" $PSScriptRoot $archive
+            & python -c "import sys;sys.path.insert(0,sys.argv[1]);from cloud_checkpoint import archive_check;archive_check(sys.argv[2]);print('EXISTING 8GiB ARCHIVE STRUCTURE GUARD: PASS')" $PSScriptRoot $archive | ForEach-Object {Write-Host $_}
             if($LASTEXITCODE -ne 0){throw 'Existing bounded archive verifier refused whole guest repository.'}
         }
         [pscustomobject]@{vmId=$vm.Id.ToString();exportBytes=($files|Measure-Object Length -Sum).Sum;encryptedRepositoryBytes=$repositoryBytes;archiveBytes=$bytes;maxBytes=8GB;fitsExistingTransport=$fits;snapshotId=$summary[0].snapshot_id;wholeExport=$true;published=$false}
