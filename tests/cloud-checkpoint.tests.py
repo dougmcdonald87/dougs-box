@@ -145,6 +145,18 @@ class CheckpointTests(unittest.TestCase):
                 with self.assertRaises(module.CheckpointError):remote.download('tag','checkpoint.json',destination,max_bytes=module.MANIFEST_BYTES)
         self.assertEqual(destination.read_bytes(),b'prior')
 
+    def test_transport_failure_reports_safe_stage_and_http_status(self):
+        from types import SimpleNamespace
+        remote=object.__new__(module.GitHubRemote);remote.repository='owner/repo'
+        result=SimpleNamespace(returncode=1,stdout='',stderr='HTTP 403: forbidden https://example.invalid/?token=DO_NOT_LEAK')
+        with patch.object(module.subprocess,'run',return_value=result):
+            with self.assertRaises(module.CheckpointError) as caught:remote.call('release','create','unique-tag')
+        message=str(caught.exception)
+        self.assertIn('release create',message)
+        self.assertIn('HTTP 403',message)
+        self.assertNotIn('DO_NOT_LEAK',message)
+        self.assertNotIn('https://',message)
+
     def test_draft_readback_uses_release_id_before_public_tag_exists(self):
         remote=object.__new__(module.GitHubRemote);remote.repository='owner/repo';remote.drafts={'new-tag':123}
         destination=self.root/'bounded.bin';destination.write_bytes(b'prior')
