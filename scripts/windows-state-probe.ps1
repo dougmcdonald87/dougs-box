@@ -211,7 +211,7 @@ function Install-WindowsStateHomeImage {
             $bootSource=Join-Path ($target+'Windows') $relative
             Write-Host ('BOOT SOURCE DIAGNOSTIC: '+([pscustomobject]@{relative=$relative;exists=(Test-Path -LiteralPath $bootSource);bytes=if(Test-Path -LiteralPath $bootSource){(Get-Item -LiteralPath $bootSource).Length}else{$null}}|ConvertTo-Json -Compress))
         }
-        & bcdboot.exe ($target+'Windows') /s $system /f UEFI /v | ForEach-Object {Write-Host $_}
+        & bcdboot.exe ($target+'Windows') /s $system /f UEFI /v /offline | ForEach-Object {Write-Host $_}
         if($LASTEXITCODE -ne 0){throw ('Guest boot-file creation failed: '+$LASTEXITCODE)}
         if(-not (Test-Path -LiteralPath ($target+'Windows\System32\ntoskrnl.exe')) -or -not (Test-Path -LiteralPath ($system+'EFI\Microsoft\Boot\BCD'))){throw 'Applied guest Windows or EFI boot files missing.'}
         Set-VMFirmware -VM $vm -FirstBootDevice $drives[0] -ErrorAction Stop
