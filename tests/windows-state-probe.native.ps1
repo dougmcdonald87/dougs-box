@@ -98,6 +98,15 @@ try {
                 } finally {Remove-PSSession $session}
             }
             Stop-VM -VM (Get-VM -Id $id -ErrorAction Stop) -ErrorAction Stop
+            if($guestCredential){
+                $offDeadline=[DateTime]::UtcNow.AddMinutes(2)
+                while((Get-VM -Id $id).State -ne 'Off' -and [DateTime]::UtcNow -lt $offDeadline){Start-Sleep -Seconds 5}
+                if((Get-VM -Id $id).State -ne 'Off'){throw 'Capacity measurement requires clean guest shutdown'}
+                . (Join-Path $PSScriptRoot '../scripts/windows-state-capacity.ps1')
+                $capacity=Measure-WindowsStateExportCapacity -Root $root -VmName $name
+                Write-Output ('NATIVE WHOLE GUEST ENCRYPTED CAPACITY: '+($capacity|ConvertTo-Json -Compress))
+                if(-not $capacity.fitsExistingTransport){throw ('Whole guest falsifies existing 8GiB transport: '+$capacity.archiveBytes+' archive bytes')}
+            }
         }
     }
 } finally {
