@@ -29,6 +29,13 @@ class CheckpointManifestTests(unittest.TestCase):
         try:self.verify(self.manifest())
         except module.ManifestError:accepted=False
         self.assertTrue(accepted,'A checkpoint filename may differ from its embedded VM identity')
+    def test_explicit_data_consistent_capture_passes(self):
+        accepted=False
+        try:
+            accepted=module.consistency_policy('save','Running',production_only=True,capture_state='CaptureDataConsistentState')=='data-consistent-export'
+        except (module.ManifestError,TypeError):
+            pass
+        self.assertTrue(accepted,'Explicit whole-VM production data-consistent capture must be supported')
     def test_running_finish_refused(self):
         with self.assertRaises(module.ManifestError):module.consistency_policy('finish','Running',shutdown_verified=True)
     def test_unclean_off_finish_refused(self):
