@@ -60,7 +60,8 @@ function Get-WindowsStateExportDiskMetadata {
 }
 
 function Export-WindowsStateCheckpoint {
-    param([Parameter(Mandatory)][string]$Root,[Parameter(Mandatory)][guid]$VmId,[ValidateSet('save','finish')][string]$Mode)
+    param([Parameter(Mandatory)][string]$Root,[Parameter(Mandatory)][guid]$VmId,[Parameter(Mandatory)][ValidateSet('save','finish')][string]$Mode)
+    $Mode=$Mode.ToLowerInvariant()
     $owner=Get-WindowsStateCheckpointOwner -Root $Root -VmId $VmId
     $vm=$owner.vm
     if($vm.State -ne 'Running'){throw 'New Save/Finish receipt requires an owned running guest.'}
@@ -128,6 +129,7 @@ function Import-WindowsStateCheckpoint {
         & python (Join-Path $PSScriptRoot 'windows_state_manifest.py') verify --root $payload --metadata $verification --manifest $manifest | ForEach-Object {Write-Host $_}
         if($LASTEXITCODE -ne 0){throw 'Checkpoint file/identity/parent/configuration verification refused import.'}
         $record=Get-Content -LiteralPath $manifest -Raw | ConvertFrom-Json
+        if($record.generation -cne (Split-Path (Split-Path $manifest -Parent) -Leaf)){throw 'Checkpoint generation and directory identity mismatch.'}
         $actualDisks=@(Get-WindowsStateExportDiskMetadata -ExportPath $payload)
         if(($actualDisks | ConvertTo-Json -Depth 5 -Compress) -cne ($record.disks | ConvertTo-Json -Depth 5 -Compress)){throw 'Native VHD disk/parent metadata differs from manifest.'}
         $config=Assert-WindowsStateOwnedPath -Root $payload -Path (Join-Path $payload $record.config)
