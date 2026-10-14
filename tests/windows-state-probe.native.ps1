@@ -55,7 +55,7 @@ try {
             } while($heartbeat.PrimaryStatusDescription -ne 'OK' -and [DateTime]::UtcNow -lt $deadline)
             if($heartbeat.PrimaryStatusDescription -ne 'OK'){throw 'Applied Home guest did not report a healthy OS heartbeat'}
             Write-Output ('NATIVE APPLIED WINDOWS10 DISK HEARTBEAT: '+$heartbeat.PrimaryStatusDescription+'; first-run setup and program fixture remain pending')
-            Stop-VM -VM (Get-VM -Id $id -ErrorAction Stop) -Shutdown -ErrorAction Stop
+            Stop-VM -VM (Get-VM -Id $id -ErrorAction Stop) -ErrorAction Stop
         }
     }
 } finally {
