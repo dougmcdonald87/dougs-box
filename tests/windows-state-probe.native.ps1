@@ -45,7 +45,13 @@ try {
             Write-Output ('NATIVE WINDOWS10 HOME MEDIA VERIFIED: '+([pscustomobject]@{sha256=$media.sha256;bytes=$media.bytes;index=$detail.ImageIndex;name=$detail.ImageName;edition=$detail.EditionId;version=[string]$detail.Version;imageBytes=$detail.ImageSize}|ConvertTo-Json -Compress))
         } finally {Dismount-DiskImage -ImagePath $media.path -ErrorAction Stop | Out-Null}
         if($env:WINDOWS_STATE_INSTALL_IMAGE -eq 'true'){
-            $receipt=Install-WindowsStateHomeImage -Root $root -VmName $name -Sha256 $env:WINDOWS_STATE_MEDIA_SHA256
+            $guestCredential=$null
+            if($env:WINDOWS_STATE_FIXTURE -eq 'true'){
+                $secret='Fixture!1'+[Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(24))
+                Write-Host ('::add-mask::'+$secret)
+                $guestCredential=[pscredential]::new('DevBoxFixture',(ConvertTo-SecureString $secret -AsPlainText -Force))
+            }
+            $receipt=Install-WindowsStateHomeImage -Root $root -VmName $name -Sha256 $env:WINDOWS_STATE_MEDIA_SHA256 -GuestCredential $guestCredential
             Write-Output ('NATIVE HOME IMAGE APPLIED: '+($receipt|ConvertTo-Json -Compress))
             Start-VM -VM (Get-VM -Id $id -ErrorAction Stop) -ErrorAction Stop
             $deadline=[DateTime]::UtcNow.AddMinutes(5);$heartbeat=$null
@@ -55,6 +61,42 @@ try {
             } while($heartbeat.PrimaryStatusDescription -ne 'OK' -and [DateTime]::UtcNow -lt $deadline)
             if($heartbeat.PrimaryStatusDescription -ne 'OK'){throw 'Applied Home guest did not report a healthy OS heartbeat'}
             Write-Output ('NATIVE APPLIED WINDOWS10 DISK HEARTBEAT: '+$heartbeat.PrimaryStatusDescription+'; first-run setup and program fixture remain pending')
+            if($guestCredential){
+                . (Join-Path $PSScriptRoot '../scripts/windows-state-fixture.ps1')
+                $session=$null;$sessionDeadline=[DateTime]::UtcNow.AddMinutes(5)
+                do {
+                    try {$session=New-PSSession -VMId $id -Credential $guestCredential -ErrorAction Stop}
+                    catch {Start-Sleep -Seconds 10}
+                } while(-not $session -and [DateTime]::UtcNow -lt $sessionDeadline)
+                if(-not $session){throw 'Guest fixture PowerShell Direct setup did not become ready'}
+                try {
+                    Assert-WindowsStateGuestSession -GuestSession $session -VmId $id
+                    & (Join-Path $PSScriptRoot 'windows-state-guest.acceptance.ps1') -GuestSession $session -VmId $id -ExpectMissing
+                    $installer=Join-Path $root 'python-3.12.10-amd64.exe'
+                    Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/3.12.10/python-3.12.10-amd64.exe' -OutFile $installer -ErrorAction Stop
+                    Install-WindowsStateFixture -GuestSession $session -VmId $id -InstallerPath $installer | Out-Null
+                    $baseline=& (Join-Path $PSScriptRoot 'windows-state-guest.acceptance.ps1') -GuestSession $session -VmId $id
+                    Write-Output ('NATIVE REAL GUEST FIXTURE BASELINE: '+($baseline|Select-Object machineName,machineGuid,programPath,programVersion,documentSha256,preferences,windowsHideFileExt|ConvertTo-Json -Compress))
+                } finally {Remove-PSSession $session}
+                Stop-VM -VM (Get-VM -Id $id -ErrorAction Stop) -ErrorAction Stop
+                $offDeadline=[DateTime]::UtcNow.AddMinutes(2)
+                while((Get-VM -Id $id).State -ne 'Off' -and [DateTime]::UtcNow -lt $offDeadline){Start-Sleep -Seconds 5}
+                if((Get-VM -Id $id).State -ne 'Off'){throw 'Guest fixture clean shutdown failed'}
+                Start-VM -VM (Get-VM -Id $id) -ErrorAction Stop
+                $session=$null;$sessionDeadline=[DateTime]::UtcNow.AddMinutes(5)
+                do {
+                    try {$session=New-PSSession -VMId $id -Credential $guestCredential -ErrorAction Stop}
+                    catch {Start-Sleep -Seconds 10}
+                } while(-not $session -and [DateTime]::UtcNow -lt $sessionDeadline)
+                if(-not $session){throw 'Guest fixture second boot PowerShell Direct unavailable'}
+                try {
+                    $second=& (Join-Path $PSScriptRoot 'windows-state-guest.acceptance.ps1') -GuestSession $session -VmId $id
+                    foreach($property in @('machineName','machineGuid','programPath','programVersion','documentSha256','windowsHideFileExt')){
+                        if($baseline.$property -cne $second.$property){throw ('Guest second boot fixture changed: '+$property)}
+                    }
+                    Write-Output 'NATIVE PROGRAM + DOCUMENT + APPLICATION/HKCU SETTINGS + IDENTITY SECOND BOOT: PASS'
+                } finally {Remove-PSSession $session}
+            }
             Stop-VM -VM (Get-VM -Id $id -ErrorAction Stop) -ErrorAction Stop
         }
     }
@@ -62,4 +104,4 @@ try {
     if($owner){Remove-WindowsStateProbe -Root $root -VmName $name}
 }
 if(@(Get-VM -ErrorAction Stop | Where-Object {$_.Id -eq $id}).Count){throw 'Owned VM cleanup failed'}
-Write-Output 'NATIVE OWNERSHIP + EMPTY VM START + DISK + CLEANUP: PASS; Windows OS boot not tested.'
+Write-Output 'NATIVE OWNERSHIP + VM START + DISK + CLEANUP: PASS; optional OS/fixture evidence is reported separately above.'

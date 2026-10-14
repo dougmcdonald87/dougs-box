@@ -151,7 +151,8 @@ function Install-WindowsStateHomeImage {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Root,
           [Parameter(Mandatory)][string]$VmName,
-          [Parameter(Mandatory)][string]$Sha256)
+          [Parameter(Mandatory)][string]$Sha256,
+          [pscredential]$GuestCredential)
     $dummy=@{FreeBytes=100GB;AvailableMemoryBytes=12GB;HyperVReady=$true;ExistingVm=$false;RootOccupied=$false}
     $base=Test-WindowsStateProbePolicy -Root $Root -VmName $VmName -Facts $dummy
     if(-not $base.eligible){throw $base.reason}
@@ -204,6 +205,13 @@ function Install-WindowsStateHomeImage {
         $target=([string]$windows.DriveLetter)+':\';$system=([string]$efi.DriveLetter)+':\'
         & dism.exe /English /Apply-Image ('/ImageFile:'+$wim) ('/Index:'+$detail.ImageIndex) ('/ApplyDir:'+$target) /CheckIntegrity | ForEach-Object {Write-Host $_}
         if($LASTEXITCODE -ne 0){throw ('Windows image application failed: '+$LASTEXITCODE)}
+        if($GuestCredential){
+            . (Join-Path $PSScriptRoot 'windows-state-fixture.ps1')
+            $answer=New-WindowsStateFixtureAnswerFile -Credential $GuestCredential
+            $panther=Join-Path ($target+'Windows') 'Panther'
+            if((Get-Item -LiteralPath $panther -ErrorAction Stop).Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Guest setup directory reparse point refused.'}
+            [IO.File]::WriteAllText((Join-Path $panther 'unattend.xml'),$answer,[Text.UTF8Encoding]::new($false))
+        }
         # Preserve the failing invocation; collect evidence before choosing a fix.
         $bootTool=Get-Command bcdboot.exe -CommandType Application -ErrorAction Stop
         Write-Host ('BOOT FILE DIAGNOSTIC: '+([pscustomobject]@{tool=$bootTool.Source;toolVersion=(Get-Item -LiteralPath $bootTool.Source).VersionInfo.FileVersion;windowsPath=($target+'Windows');efiPath=$system;diskNumber=$policy.diskNumber;efiPartition=$efi.PartitionNumber;windowsPartition=$windows.PartitionNumber;efiFileSystem=(Get-Volume -Partition $efi -ErrorAction Stop).FileSystem;efiFreeBytes=(Get-Volume -Partition $efi -ErrorAction Stop).SizeRemaining}|ConvertTo-Json -Compress))
