@@ -36,7 +36,7 @@ def validate_transfer_record(value,expected_generation,current_host,current_run)
             return str(parsed)
         except (ValueError,TypeError,AttributeError):raise CheckpointError('Invalid transfer host/VM identity') from None
     fields={'schema','producer_run','producer_attempt','producer_host','source_sha','vm_id','vm_name','root','generation','manifest_sha256','baseline'}
-    if not isinstance(value,dict) or set(value)!=fields or type(value['schema']) is not int or value['schema']!=1:
+    if not isinstance(value,dict) or set(value) not in (fields,fields|{'origin_generation'}) or type(value['schema']) is not int or value['schema']!=1:
         raise CheckpointError('Invalid transfer record schema')
     match=TAG.fullmatch(expected_generation) if isinstance(expected_generation,str) else None
     source=re.fullmatch(r'ci-([1-9]\d*)-([1-9]\d*)',match.group(1)) if match else None
@@ -46,10 +46,17 @@ def validate_transfer_record(value,expected_generation,current_host,current_run)
         raise CheckpointError('Transfer consumer run must be distinct')
     if guid(value['producer_host'])==guid(current_host):raise CheckpointError('Transfer consumer host must be distinct')
     guid(value['vm_id'])
-    suffix=value['producer_run']+'-'+value['producer_attempt']
+    if 'origin_generation' in value:
+        origin=TAG.fullmatch(value['origin_generation']) if isinstance(value['origin_generation'],str) else None
+        chain=re.fullmatch(r'ci-([1-9]\d*)-([1-9]\d*)',origin.group(1)) if origin else None
+        if not chain:raise CheckpointError('Interactive origin generation mismatch')
+        suffix=chain.group(1)+'-'+chain.group(2)
+    else:
+        suffix=value['producer_run']+'-'+value['producer_attempt']
     if value['vm_name']!='DevBoxWindowsState-'+suffix or value['root']!='E:/DevBox/Tools/WindowsStateProbe/probe-'+suffix:
         raise CheckpointError('Transfer owner scope mismatch')
-    for field,pattern in [('generation',r'finish-[0-9a-f]{32}'),('manifest_sha256',r'[0-9a-f]{64}'),('source_sha',r'[0-9a-f]{40}')]:
+    mode_pattern=r'(save|finish)-[0-9a-f]{32}' if 'origin_generation' in value else r'finish-[0-9a-f]{32}'
+    for field,pattern in [('generation',mode_pattern),('manifest_sha256',r'[0-9a-f]{64}'),('source_sha',r'[0-9a-f]{40}')]:
         if not isinstance(value[field],str) or not re.fullmatch(pattern,value[field]):raise CheckpointError('Invalid transfer generation/digest')
     baseline=value['baseline']
     if not isinstance(baseline,dict) or set(baseline)!={'machineName','machineGuid','programPath','programVersion','documentSha256','preferences','windowsHideFileExt'}:
