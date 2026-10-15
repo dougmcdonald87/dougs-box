@@ -307,18 +307,7 @@ jobs:
           if($env:GITHUB_REF -cne 'refs/heads/pilot/windows-home-connection-20261015'){throw 'Only manual isolated pilot branch may restore and offer operator controls.'}
           $seed='devbox-checkpoint-v1-ci-38647908553-1-20261014T225101Z-eb2366ef7dc34ea4aee45c30bbc721b6'
           $sha=if($env:EXPECTED_WINDOWS_STATE_GENERATION -ceq $seed){'5f13bc6fa567fdcdea5342a7481cb679a4a8b5e9'}else{$env:EXPECTED_WINDOWS_STATE_SOURCE_SHA}
-          if($sha -cnotmatch '^[0-9a-f]{40}
-      - name: Install official artifact SDK for disposable remote pairing
-        shell: pwsh
-        run: |
-          npm install --prefix .github/actions/pilot-device --no-save --ignore-scripts --no-audit --no-fund @actions/artifact@6.3.1
-          if($LASTEXITCODE -ne 0){throw 'Official SDK installation failed.'}
-      - name: Publish encrypted pairing and hold verified Windows 10 guest
-        uses: ./.github/actions/pilot-device
-        env:
-          WINDOWS_HOME_CONTROL_DIR: ${{ steps.restore_guest.outputs.control_dir }}
-          PILOT_RSA_MODULUS: 'kSFkr1dssDXH+LnyZYicgk5uxQP/SIk4JRwi4Zf5Lmql491A4exmAfuF4EF6td3uB19QGoGY/xmBrSOMnnupU9xinzPJf1nzMQu3BVtVZB8mADriTiEG7APoB2wstiDLyTn6odL3OOv0ofn2KS95b+IPbJI1LOK8/if6wBZMejk3kn4yFzbI9YdZ5nqdyVU8SOEmsfglkvzits2kF1fYEJSSDuiXTDD/9RRVj1YPzbzDTUDw/lIT5QKUgAba8K5e4+SyvPwlgPxjm7Y5QHPZfOOip2wD0OM87dscRmujH6iVRaBD8rCShqXVN3viOY1d8lp5n60Gk/U9VufJvH7RtZoMhW4/AFlghI5WC+3CRb9OUVRbx82+o6QblkN0RO0/QBF9efAIwLiZXySlFhIWwC1OFqX49p/zMyv5Kf2kZNR/Uu8nbLV3vfeeDhFI5IIUlGhfiHz8keWlkEUfXRN7UITPwV0IV/sZtNMSv3+QMxam3+G4f+ps52s2ke3Jv+GP'
-){throw 'Interactive restore requires explicitly pinned producer SHA.'}
+          if($sha -cnotmatch '^[0-9a-f]{40}$'){throw 'Interactive restore requires explicitly pinned producer SHA.'}
           . ./scripts/windows-state-roundtrip.ps1
           $parts=@(Restore-WindowsStateRoundtrip -ExpectedGeneration $env:EXPECTED_WINDOWS_STATE_GENERATION -HoldForOperator -ExpectedSourceSha $sha)
           $result=@($parts|Where-Object {$_ -is [pscustomobject] -and $_.freshHostRestored -eq $true}|Select-Object -First 1)
