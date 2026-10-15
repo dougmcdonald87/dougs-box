@@ -32,10 +32,20 @@ if(Test-Path -LiteralPath $dir){throw 'Per-run control directory must be new.'}
 New-Item -Path $dir -ItemType Directory -ErrorAction Stop|Out-Null
 $acl=Get-Acl -LiteralPath $dir
 $acl.SetAccessRuleProtection($true,$false)
-foreach($sid in @([Security.Principal.WindowsIdentity]::GetCurrent().User.Value,$rdpUser.SID.Value,'S-1-5-18')|Select-Object -Unique){
- $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($sid,'FullControl','ContainerInherit,ObjectInherit','None','Allow'))
+$allowedSids=@([Security.Principal.WindowsIdentity]::GetCurrent().User.Value,$rdpUser.SID.Value,'S-1-5-18')|Select-Object -Unique
+foreach($sid in $allowedSids){
+ # Explicit SecurityIdentifier avoids Windows treating a textual SID as an
+ # account name. Validated with a real disposable Windows runner in 38826328423.
+ $principal=[Security.Principal.SecurityIdentifier]::new($sid)
+ $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($principal,'FullControl','ContainerInherit,ObjectInherit','None','Allow'))
 }
 Set-Acl -LiteralPath $dir -AclObject $acl -ErrorAction Stop
+$readback=Get-Acl -LiteralPath $dir -ErrorAction Stop
+if(-not $readback.AreAccessRulesProtected){throw 'Pilot control ACL inheritance is not protected.'}
+$actualSids=@($readback.GetAccessRules($true,$false,[Security.Principal.SecurityIdentifier])|ForEach-Object {$_.IdentityReference.Value}|Select-Object -Unique)
+foreach($sid in $allowedSids){
+ if($actualSids -notcontains $sid){throw ('Pilot control ACL missing authorized identity SID: '+$sid)}
+}
 foreach($name in @('requests','responses')){New-Item -ItemType Directory -Path (Join-Path $dir $name) -ErrorAction Stop|Out-Null}
 $deadline=[DateTimeOffset]::UtcNow.AddMinutes(220).ToUnixTimeMilliseconds()
 [ordered]@{schema=1;runId=$env:GITHUB_RUN_ID;vmId=$VmId.ToString('D').ToLowerInvariant();generation=$ExpectedGeneration;originGeneration=$OriginGeneration;root=$owner.root;vmName=$owner.name;deadlineMs=$deadline}|
