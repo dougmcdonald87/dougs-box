@@ -122,7 +122,12 @@ function Restore-WindowsStateRoundtrip {
     $raw=& gh api ('repos/'+$env:GITHUB_REPOSITORY+'/actions/runs/'+$producerRun)
     if($LASTEXITCODE -ne 0){throw 'Producer completion cannot be verified.'}
     $producer=($raw -join "`n")|ConvertFrom-Json
-    if($producer.status -cne 'completed' -or $producer.conclusion -cne 'success' -or [string]$producer.run_attempt -cne $producerAttempt -or $producer.event -cne 'workflow_dispatch' -or $producer.path -cne '.github/workflows/windows-state-probe-validate.yml' -or $producer.head_sha -cne $sourceSha){throw 'Producer must have completed successfully on the exact consumer revision.'}
+    $canceledInteractiveSave=$HoldForOperator -and $producer.status -ceq 'completed' -and $producer.conclusion -ceq 'cancelled'
+    if($producer.status -cne 'completed' -or ($producer.conclusion -cne 'success' -and -not $canceledInteractiveSave) -or
+       [string]$producer.run_attempt -cne $producerAttempt -or $producer.event -cne 'workflow_dispatch' -or
+       $producer.path -cne '.github/workflows/windows-state-probe-validate.yml' -or $producer.head_sha -cne $sourceSha){
+        throw 'Producer must be successful or an explicitly verified canceled interactive Save, with exact pinned revision.'
+    }
     . (Join-Path $PSScriptRoot 'windows-state-checkpoint.ps1')
     . (Join-Path $PSScriptRoot 'windows-state-fixture.ps1')
     & (Join-Path $PSScriptRoot 'bootstrap.ps1') -CloudCandidate
@@ -144,7 +149,7 @@ function Restore-WindowsStateRoundtrip {
     if($records.Count -ne 1){throw 'Whole guest transfer record missing/ambiguous.'}
     $systemProduct=Get-CimInstance Win32_ComputerSystemProduct -ErrorAction Stop
     $outerId=([guid]$systemProduct.UUID).ToString()
-    $raw=& python (Join-Path $PSScriptRoot 'windows_state_transfer.py') verify-record --generation $ExpectedGeneration --record $records[0].FullName --host $outerId --run $env:GITHUB_RUN_ID
+    $raw=& python (Join-Path $PSScriptRoot 'windows_state_transfer.py') verify-record --generation $ExpectedGeneration --record $records[0].FullName --host $outerId --run $env:GITHUB_RUN_ID --producer-conclusion $producer.conclusion
     if($LASTEXITCODE -ne 0){throw 'Fresh-host/source/fixture identity verification refused.'}
     $record=($raw -join "`n")|ConvertFrom-Json
     if($record.source_sha -cne $sourceSha){throw 'Encrypted producer revision mismatch.'}
