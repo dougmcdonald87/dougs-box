@@ -215,19 +215,39 @@ jobs:
           }
           if ([string]::IsNullOrWhiteSpace($prompt)) { throw 'Device agent produced no diagnostics.' }
           $bytes = [Text.Encoding]::UTF8.GetBytes($prompt)
-          Write-Output 'PILOT_ENCRYPTED_PAIRING_BEGIN'
+          $artifact = Join-Path $env:RUNNER_TEMP 'pilot-encrypted-pairing.txt'
+          'PILOT_ENCRYPTED_PAIRING_BEGIN' | Set-Content -LiteralPath $artifact -Encoding utf8
           $ix = 0
           for ($p = 0; $p -lt $bytes.Length; $p += 120) {
             $length = [Math]::Min(120, $bytes.Length - $p)
             $segment = New-Object byte[] $length
             [Array]::Copy($bytes,$p,$segment,0,$length)
             $encrypted = $rsa.Encrypt($segment,[System.Security.Cryptography.RSAEncryptionPadding]::OaepSHA256)
-            Write-Output ('PILOT_PAIR_'+$ix+'='+[Convert]::ToBase64String($encrypted))
+            Add-Content -LiteralPath $artifact -Value ('PILOT_PAIR_'+$ix+'='+[Convert]::ToBase64String($encrypted))
             $ix += 1
           }
-          Write-Output ('PILOT_ENCRYPTED_PAIRING_END chunks='+$ix)
+          Add-Content -LiteralPath $artifact -Value ('PILOT_ENCRYPTED_PAIRING_END chunks='+$ix)
           if ($agent.HasExited) { throw 'Agent exited before pairing.' }
+          $agent.Id | Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'pilot-agent.pid')
+          Write-Output 'PILOT PAIRING: encrypted artifact ready; agent background process started.'
+
+      - name: Upload encrypted pairing artifact while agent stays running
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: windows-home-pilot-pairing-${{ github.run_id }}
+          path: ${{ runner.temp }}/pilot-encrypted-pairing.txt
+          retention-days: 1
+          if-no-files-found: error
+
+      - name: Hold independent terminal for up to 30 minutes
+        shell: pwsh
+        run: |
+          $agentId = [int](Get-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'pilot-agent.pid') -Raw)
+          Write-Output 'PILOT: encrypted pairing artifact uploaded; waiting for device approval.'
           $deadline = [DateTime]::UtcNow.AddMinutes(30)
-          while ([DateTime]::UtcNow -lt $deadline -and -not $agent.HasExited) { Start-Sleep -Seconds 12 }
-          if (-not $agent.HasExited) { Stop-Process -Id $agent.Id -ErrorAction SilentlyContinue }
-          Write-Output 'PILOT TERMINAL: session ended.'
+          while ([DateTime]::UtcNow -lt $deadline) {
+            if (-not (Get-Process -Id $agentId -ErrorAction SilentlyContinue)) { throw 'Device agent process exited.' }
+            Start-Sleep -Seconds 12
+          }
+          Stop-Process -Id $agentId -ErrorAction SilentlyContinue
+          Write-Output 'PILOT: session ended by fixed time limit.'
