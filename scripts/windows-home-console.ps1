@@ -14,7 +14,11 @@ $owner=Get-WindowsStateCheckpointOwner -Root $Root -VmId $VmId
 if($owner.name -cne ('DevBoxWindowsState-'+$origin.Groups[1].Value+'-'+$origin.Groups[2].Value) -or $owner.vm.State -ne 'Running'){throw 'Unexpected guest identity or state.'}
 $vmconnect=Join-Path $env:WINDIR 'System32\vmconnect.exe'
 if(-not(Test-Path -LiteralPath $vmconnect -PathType Leaf)){throw 'Hyper-V console executable missing.'}
-$statePath=Join-Path $env:DEVBOX_CONTROL_PATH 'rdp-state.txt'
+# bootstrap.ps1 reassigns DEVBOX_CONTROL_PATH to E:\DevBox\Control inside restore.
+# The earlier RDP setup wrote its authenticated account receipt under RUNNER_TEMP.
+# Reconstruct that immutable pilot receipt path rather than trusting the rewritten env.
+if([string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)){throw 'GitHub runner temporary root missing.'}
+$statePath=Join-Path (Join-Path $env:RUNNER_TEMP 'windows-home-restore-hold-rdp') 'rdp-state.txt'
 if(-not(Test-Path -LiteralPath $statePath -PathType Leaf)){throw 'RDP account setup receipt missing.'}
 $stateText=(Get-Content -LiteralPath $statePath -Raw -ErrorAction Stop).Trim()
 $accountMatch=[regex]::Match($stateText,'^rdpAccounts=(runneradmin|devbox)$')
