@@ -9,23 +9,32 @@ async function saveReceipt(root,req,status,extra={}){
  await writeFile(temp,JSON.stringify(formatOperatorReceipt(req,status,extra))+'\n',{encoding:'utf8',flag:'wx'});
  await rename(temp,dest);
 }
-export async function drainOperatorRequests({root,session,executor,nowMs=Date.now()}){
+export async function drainOperatorRequests({root,session,executor,nowMs=undefined}){
  if(typeof root!=='string'||typeof executor!=='function')throw new Error('worker configuration');
  const names=nextRequest(await readdir(join(root,'requests')));
- let claimed=false,verifiedFinish=false,processed=0;
+ let verifiedFinish=false,processed=0;
+ const queue=[];
+ // Claim files before ordering, so their request data cannot change mid-publish.
  for(const name of names){
   const original=join(root,'requests',name),working=original+'.working';
-  const info=await lstat(original);
+  let info;
+  try{info=await lstat(original);}catch{continue;}
   if(!info.isFile()||info.isSymbolicLink()||info.size>4096)continue;
   try{await rename(original,working);}catch{continue;}
   const opId=name.slice('request-'.length,-'.json'.length);
   let req;
   try{req=JSON.parse(await readFile(working,'utf8'));if(req.operationId!==opId)throw Error('id');}
   catch{req={operationId:opId,operation:'Invalid'};}
+  const stamp=typeof req.createdUtc==='string'?Date.parse(req.createdUtc):NaN;
+  queue.push({name,working,opId,req,stamp:Number.isFinite(stamp)?stamp:Infinity});
+ }
+ // Explicit owner submit time takes precedence over arbitrary UUID filename order.
+ queue.sort((a,b)=>a.stamp-b.stamp||a.name.localeCompare(b.name));
+ for(const {name,working,opId,req} of queue){
   if(await exists(receiptFile(root,opId))){await unlink(working);continue;}
-  const valid=validateOperatorRequest(req,session,{nowMs,busy:claimed});
+  if(verifiedFinish){await saveReceipt(root,req,'failed',{reason:'session-finished'});await unlink(working);processed++;continue;}
+  const valid=validateOperatorRequest(req,session,{nowMs:nowMs??Date.now()});
   if(!valid.ok){await saveReceipt(root,req,'failed',{reason:valid.reason});await unlink(working);processed++;continue;}
-  claimed=true;
   await saveReceipt(root,req,'received');
   try{
    const result=await executor(req);
