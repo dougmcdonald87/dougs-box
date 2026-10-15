@@ -85,7 +85,7 @@ function Publish-WindowsStateRoundtrip {
 }
 
 function Restore-WindowsStateRoundtrip {
-    param([Parameter(Mandatory)][string]$ExpectedGeneration)
+    param([Parameter(Mandatory)][string]$ExpectedGeneration,[switch]$HoldForOperator)
     if($ExpectedGeneration -cnotmatch '^devbox-checkpoint-v1-ci-([1-9][0-9]*)-([1-9][0-9]*)-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{32}$'){throw 'Only an exact isolated CI generation can be restored.'}
     $producerRun=$Matches[1];$producerAttempt=$Matches[2]
     Assert-WindowsStateRoundtripContext
@@ -145,6 +145,10 @@ function Restore-WindowsStateRoundtrip {
         } finally {Remove-PSSession $session}
         [pscustomobject]@{generation=$ExpectedGeneration;vmId=$id.ToString();producerHost=$record.producer_host;consumerHost=$outerId;sourceRun=$record.producer_run;consumerRun=$env:GITHUB_RUN_ID;boot=$true;program=$actual.programVersion;documentSha256=$actual.documentSha256;preferences=$actual.preferences;windowsHideFileExt=$actual.windowsHideFileExt;machineGuid=$actual.machineGuid;freshHostRestored=$true}
     } finally {
-        if(Get-VM -Id $id -ErrorAction SilentlyContinue){Remove-WindowsStateProbe -Root $root -VmName $name}
+        if(-not $HoldForOperator -or -not $actual){
+            if(Get-VM -Id $id -ErrorAction SilentlyContinue){Remove-WindowsStateProbe -Root $root -VmName $name}
+        } else {
+            Write-Output ('ISOLATED_VERIFIED_GUEST_HELD='+$name)
+        }
     }
 }
