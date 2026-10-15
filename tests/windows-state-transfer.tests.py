@@ -45,6 +45,24 @@ class ExactGenerationReaderTests(unittest.TestCase):
   for field,value in [('programPath','D:/wrong.exe'),('documentSha256','bad'),('machineGuid','bad'),('preferences',{'theme':'light','volume':84,'secret':'x'}),('windowsHideFileExt',True)]:
    record=self.record();record['baseline'][field]=value
    with self.subTest(field=field):self.assertFalse(self.validate(record))
+ def test_interactive_restored_guest_keeps_original_root(self):
+  record=self.record()
+  record['vm_name']='DevBoxWindowsState-999-1'
+  record['root']='E:/DevBox/Tools/WindowsStateProbe/probe-999-1'
+  record['origin_generation']='devbox-checkpoint-v1-ci-999-1-20261014T190000Z-'+'e'*32
+  record['generation']='save-'+'b'*32
+  self.assertTrue(self.validate(record))
+ def test_interactive_origin_mismatch_cannot_target_another_vm(self):
+  record=self.record()
+  record['vm_name']='DevBoxWindowsState-999-1'
+  record['root']='E:/DevBox/Tools/WindowsStateProbe/probe-999-1'
+  record['origin_generation']='devbox-checkpoint-v1-ci-999-1-20261014T190000Z-'+'e'*32
+  for field,value in [('vm_name','DevBoxWindowsState-888-1'),('root','D:/user'),('origin_generation',TAG),('origin_generation','production')]:
+   x=copy.deepcopy(record);x[field]=value
+   with self.subTest(field=field):self.assertFalse(self.validate(x))
+ def test_legacy_fixture_save_stays_forbidden(self):
+  record=self.record();record['generation']='save-'+'b'*32
+  self.assertFalse(self.validate(record))
  def test_exact_source_generation_only(self):
   r=self.reader();self.assertEqual(r.generations(),[TAG]);self.assertEqual(r.channel,'ci-123-1')
  def test_all_mutation_routes_refused_before_command(self):
