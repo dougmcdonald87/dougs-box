@@ -11,6 +11,7 @@ async function saveReceipt(root,req,status,extra={}){
 }
 export async function drainOperatorRequests({root,session,executor,nowMs=undefined}){
  if(typeof root!=='string'||typeof executor!=='function')throw new Error('worker configuration');
+ const claimedAtMs=nowMs??Date.now();
  const names=nextRequest(await readdir(join(root,'requests')));
  let verifiedFinish=false,processed=0;
  const queue=[];
@@ -33,7 +34,7 @@ export async function drainOperatorRequests({root,session,executor,nowMs=undefin
  for(const {name,working,opId,req} of queue){
   if(await exists(receiptFile(root,opId))){await unlink(working);continue;}
   if(verifiedFinish){await saveReceipt(root,req,'failed',{reason:'session-finished'});await unlink(working);processed++;continue;}
-  const valid=validateOperatorRequest(req,session,{nowMs:nowMs??Date.now()});
+  const valid=validateOperatorRequest(req,session,{nowMs:claimedAtMs});
   if(!valid.ok){await saveReceipt(root,req,'failed',{reason:valid.reason});await unlink(working);processed++;continue;}
   await saveReceipt(root,req,'received');
   try{
