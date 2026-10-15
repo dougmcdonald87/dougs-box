@@ -23,3 +23,27 @@ test('queued Save then Finish executes in owner order',async()=>{
  assert.equal(result.verifiedFinish,true);
  }finally{await rm(root,{recursive:true,force:true});}
 });
+test('Finish already queued is not invalidated by 11-minute Save upload',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'pilot-upload-'));
+ const originalNow=Date.now;
+ let clock=now;
+ try{
+  await mkdir(join(root,'requests'));await mkdir(join(root,'responses'));
+  const vmId='66b514d0-7246-493f-ade3-1f004cd12411';
+  const session={vmId,runId:'38750000000',generation:gen,deadlineMs:now+3600000};
+  for(const [operation,id,created] of [['Save','c972fbc3-f1a9-46aa-b0b7-cd407c9ea77f',now-1000],['Finish','c972fbc3-f1a9-46aa-b0b7-cd407c9ea770',now]]){
+   await writeFile(join(root,'requests','request-'+id+'.json'),JSON.stringify({
+    schema:1,runId:session.runId,vmId,generation:gen,operation,operationId:id,createdUtc:new Date(created).toISOString()
+   }));
+  }
+  Date.now=()=>clock;
+  const executed=[];
+  const result=await drainOperatorRequests({root,session,executor:async req=>{
+   executed.push(req.operation);
+   if(req.operation==='Save')clock+=11*60*1000;
+   return {verified:true,generation:latest};
+  }});
+  assert.deepEqual(executed,['Save','Finish']);
+  assert.equal(result.verifiedFinish,true);
+ }finally{Date.now=originalNow;await rm(root,{recursive:true,force:true});}
+});
