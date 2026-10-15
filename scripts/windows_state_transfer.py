@@ -26,7 +26,7 @@ class ExactGenerationReader(GitHubRemote):
     def upload(self,tag,path):raise CheckpointError('Read-only recovery cannot upload')
     def finish(self,tag):raise CheckpointError('Read-only recovery cannot publish')
 
-def validate_transfer_record(value,expected_generation,current_host,current_run):
+def validate_transfer_record(value,expected_generation,current_host,current_run,producer_conclusion='success'):
     """Bind authenticated fixture metadata to its exact producer and a fresh host."""
     import uuid
     def guid(item):
@@ -58,6 +58,10 @@ def validate_transfer_record(value,expected_generation,current_host,current_run)
     mode_pattern=r'(save|finish)-[0-9a-f]{32}' if 'origin_generation' in value else r'finish-[0-9a-f]{32}'
     for field,pattern in [('generation',mode_pattern),('manifest_sha256',r'[0-9a-f]{64}'),('source_sha',r'[0-9a-f]{40}')]:
         if not isinstance(value[field],str) or not re.fullmatch(pattern,value[field]):raise CheckpointError('Invalid transfer generation/digest')
+    if producer_conclusion not in ('success','cancelled'):
+        raise CheckpointError('Producer job conclusion not accepted')
+    if producer_conclusion=='cancelled' and ('origin_generation' not in value or not re.fullmatch(r'save-[0-9a-f]{32}',value['generation'])):
+        raise CheckpointError('Only verified interactive Save may survive a canceled producer')
     baseline=value['baseline']
     if not isinstance(baseline,dict) or set(baseline)!={'machineName','machineGuid','programPath','programVersion','documentSha256','preferences','windowsHideFileExt'}:
         raise CheckpointError('Invalid transfer baseline schema')
@@ -79,7 +83,7 @@ if __name__=='__main__':
     parser.add_argument('operation',choices=['fetch','verify-record'])
     parser.add_argument('--generation',required=True)
     parser.add_argument('--archive');parser.add_argument('--restic-exe')
-    parser.add_argument('--record');parser.add_argument('--host');parser.add_argument('--run')
+    parser.add_argument('--record');parser.add_argument('--host');parser.add_argument('--run');parser.add_argument('--producer-conclusion',default='success')
     args=parser.parse_args()
     try:
         if args.operation=='fetch':
@@ -91,7 +95,7 @@ if __name__=='__main__':
             if not args.record or not args.host or not args.run:raise CheckpointError('Recovery record and current host/run required')
             path=Path(args.record)
             if path.is_symlink() or not 0<path.stat().st_size<=1024**2:raise CheckpointError('Invalid transfer record file/size')
-            value=validate_transfer_record(json.loads(path.read_text(encoding='utf-8-sig')),args.generation,args.host,args.run)
+            value=validate_transfer_record(json.loads(path.read_text(encoding='utf-8-sig')),args.generation,args.host,args.run,producer_conclusion=args.producer_conclusion)
         print(json.dumps(value,separators=(',',':')))
     except Exception as error:
         detail=str(error) if isinstance(error,CheckpointError) else type(error).__name__
