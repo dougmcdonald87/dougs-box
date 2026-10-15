@@ -306,8 +306,8 @@ jobs:
           npm install --no-fund --no-audit --ignore-scripts --no-save @actions/artifact@6.3.1
           if($LASTEXITCODE -ne 0){throw 'Artifact toolkit installation failed'}
           'harmless dummy text' | Set-Content -LiteralPath 'pilot-dummy.txt'
-          $code='const {DefaultArtifactClient}=require("@actions/artifact");new DefaultArtifactClient().uploadArtifact("pilot-midstep-"+process.env.GITHUB_RUN_ID,["pilot-dummy.txt"],{retentionDays:1}).then(r=>{console.log("PILOT_MIDSTEP_ARTIFACT_ID="+r.id)}).catch(e=>{console.error(e.message);process.exit(1)})'
-          node -e $code
+          $code='import {DefaultArtifactClient} from "@actions/artifact";new DefaultArtifactClient().uploadArtifact("pilot-midstep-"+process.env.GITHUB_RUN_ID,["pilot-dummy.txt"],{retentionDays:1}).then(r=>{console.log("PILOT_MIDSTEP_ARTIFACT_ID="+r.id)}).catch(e=>{console.error(e.message);process.exit(1)})'
+          node --input-type=module -e $code
           if($LASTEXITCODE -ne 0){throw 'Midstep artifact publication failed'}
           Write-Output 'PILOT MIDSTEP: dummy artifact published; still in same workflow step.'
           Start-Sleep -Seconds 45
