@@ -25,7 +25,7 @@ on:
       transfer_phase:
         description: 'Isolated native probe, encrypted whole Windows producer, or independently fresh restore'
         type: choice
-        options: [probe, publish, restore, transport-probe, operator]
+        options: [probe, publish, restore, transport-probe, operator, process-probe]
         default: probe
       transport_full_part:
         description: 'Use a full512MiB random non-user probe payload instead of32bytes'
@@ -258,3 +258,35 @@ jobs:
           }
           Stop-Process -Id $agentId -ErrorAction SilentlyContinue
           Write-Output 'PILOT: session ended by fixed time limit.'
+
+  process-probe:
+    if: github.event_name == 'workflow_dispatch' && inputs.transfer_phase == 'process-probe'
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Launch harmless tracked and untracked sleepers
+        shell: pwsh
+        id: launch
+        run: |
+          $ErrorActionPreference='Stop'
+          $sleepScript='Start-Sleep -Seconds 120'
+          $tracked=Start-Process -FilePath (Get-Command pwsh).Source -ArgumentList '-NoProfile','-NonInteractive','-Command',$sleepScript -PassThru -WindowStyle Hidden
+          $env:RUNNER_TRACKING_ID=''
+          $untracked=Start-Process -FilePath (Get-Command pwsh).Source -ArgumentList '-NoProfile','-NonInteractive','-Command',$sleepScript -PassThru -WindowStyle Hidden
+          Write-Output ("TRACKED_STARTED="+$tracked.Id+";UNTRACKED_STARTED="+$untracked.Id)
+          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value ('tracked='+$tracked.Id)
+          Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value ('untracked='+$untracked.Id)
+      - name: Falsify runner step-process cleanup theory
+        shell: pwsh
+        env:
+          TRACKED_ID: ${{ steps.launch.outputs.tracked }}
+          UNTRACKED_ID: ${{ steps.launch.outputs.untracked }}
+        run: |
+          $tracked=Get-Process -Id ([int]$env:TRACKED_ID) -ErrorAction SilentlyContinue
+          $untracked=Get-Process -Id ([int]$env:UNTRACKED_ID) -ErrorAction SilentlyContinue
+          Write-Output ('RUNNER_TRACKED_SURVIVED='+[bool]$tracked)
+          Write-Output ('RUNNER_UNTRACKED_SURVIVED='+[bool]$untracked)
+          if($tracked){Stop-Process -Id $tracked.Id -ErrorAction SilentlyContinue}
+          if($untracked){Stop-Process -Id $untracked.Id -ErrorAction SilentlyContinue}
