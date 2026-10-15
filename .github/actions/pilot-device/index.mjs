@@ -59,11 +59,19 @@ async function run() {
   if (!ready) throw new Error('Desktop Commander device-code flow did not reach the authorization stage.');
   if (exitCode !== null || errorType) throw new Error('Remote agent exited before owner authorization.');
   console.log('PILOT: ready for user approval; keeping agent alive in this same GitHub action.');
-  const deadline = Date.now() + 25 * 60000;
-  while (Date.now() < deadline && exitCode === null && !errorType) await sleep(10000);
-  if (exitCode !== null || errorType) throw new Error('Remote agent stopped during user-authorization hold.');
-  device.kill();
-  console.log('PILOT: isolated terminal session expired at its fixed limit.');
+  // Leave ten minutes of the 55-minute GitHub job for cleanup and diagnostics.
+  const deadline = Date.now() + 45 * 60000;
+  try {
+    while (Date.now() < deadline && exitCode === null && !errorType) await sleep(10000);
+    if (exitCode !== null || errorType) throw new Error('Remote agent stopped during user-authorization hold.');
+    console.log('PILOT: isolated terminal session expired at its 45-minute hold limit.');
+  } finally {
+    // Windows cmd.exe may spawn npx and a grandchild agent. Stop the entire tree.
+    if (exitCode === null && !errorType) {
+      const killer = spawn('taskkill.exe', ['/PID', String(device.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+      await new Promise(resolve => { killer.once('exit', resolve); killer.once('error', resolve); });
+    }
+  }
 }
 
 await run();
