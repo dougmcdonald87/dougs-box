@@ -377,6 +377,12 @@ jobs:
           $env:DEVBOX_CONTROL_PATH=Join-Path $env:RUNNER_TEMP 'windows-home-restore-hold-rdp'
           New-Item -Path $env:DEVBOX_CONTROL_PATH -ItemType Directory -Force | Out-Null
           ./scripts/configure-rdp.ps1 -Password (ConvertTo-SecureString $env:DEVBOX_RDP_PASSWORD -AsPlainText -Force)
+      - name: Refuse bootstrap RDP account receipt path regression before expensive restore
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          python ./tests/windows-home-rdp-receipt.tests.py
+          if($LASTEXITCODE -ne 0){throw 'Pilot RDP receipt cross-step path tests failed; guest restore forbidden.'}
       - name: Restore, boot and verify isolated Windows 10 Home guest without deleting verified VM
         id: restore_guest
         shell: pwsh
