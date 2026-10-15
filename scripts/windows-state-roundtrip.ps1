@@ -58,15 +58,23 @@ function Publish-WindowsStateRoundtrip {
         if($LASTEXITCODE -ne 0){throw 'Transfer refused unverified whole VM files.'}
     } finally {Remove-Item -LiteralPath $proof -Force}
     $channel='ci-'+$env:GITHUB_RUN_ID+'-'+$env:GITHUB_RUN_ATTEMPT
-    if($Root -cne ('E:/DevBox/Tools/WindowsStateProbe/probe-'+$env:GITHUB_RUN_ID+'-'+$env:GITHUB_RUN_ATTEMPT)){throw 'Publisher must own the current CI run channel.'}
+    if(-not $interactive -and $Root -cne ('E:/DevBox/Tools/WindowsStateProbe/probe-'+$env:GITHUB_RUN_ID+'-'+$env:GITHUB_RUN_ATTEMPT)){throw 'Publisher must own the current CI run channel.'}
     $manifestHash=(Get-FileHash -LiteralPath $manifest -Algorithm SHA256).Hash.ToLowerInvariant()
     $transfer=Join-Path $directory 'WINDOWS-STATE-TRANSFER.json'
     if(Test-Path -LiteralPath $transfer){throw 'Transfer metadata must be new.'}
     $systemProduct=Get-CimInstance Win32_ComputerSystemProduct -ErrorAction Stop
     $outerId=([guid]$systemProduct.UUID).ToString()
     if([guid]$outerId -eq [guid]::Empty -or $env:GITHUB_SHA -cnotmatch '^[0-9a-f]{40}$'){throw 'Producer host/revision identity unavailable.'}
-    [ordered]@{schema=1;producer_run=$env:GITHUB_RUN_ID;producer_attempt=$env:GITHUB_RUN_ATTEMPT;producer_host=$outerId;source_sha=$env:GITHUB_SHA;vm_id=$VmId.ToString();vm_name=$owner.name;root=$Root;generation=$Checkpoint.generation;manifest_sha256=$manifestHash;baseline=($Baseline|Select-Object machineName,machineGuid,programPath,programVersion,documentSha256,preferences,windowsHideFileExt)}|ConvertTo-Json -Depth 8|Set-Content -LiteralPath $transfer -Encoding utf8
-    $repo=Join-Path $Root 'transfer-restic';$tools=Join-Path $Root 'transfer-tools';$archive=Join-Path $Root 'transfer-encrypted.zip';$check=Join-Path $Root 'transfer-readback';$receipts=Join-Path $Root 'transfer-receipt'
+    $record=[ordered]@{schema=1;producer_run=$env:GITHUB_RUN_ID;producer_attempt=$env:GITHUB_RUN_ATTEMPT;producer_host=$outerId;source_sha=$env:GITHUB_SHA;vm_id=$VmId.ToString();vm_name=$owner.name;root=$Root;generation=$Checkpoint.generation;manifest_sha256=$manifestHash;baseline=($Baseline|Select-Object machineName,machineGuid,programPath,programVersion,documentSha256,preferences,windowsHideFileExt)}
+    if($interactive){$record['origin_generation']=[string]$info.originGeneration}
+    $record|ConvertTo-Json -Depth 8|Set-Content -LiteralPath $transfer -Encoding utf8
+    $stageRoot=$Root
+    if($interactive){
+        $stageRoot=Assert-WindowsStateOwnedPath -Root $Root -Path (Join-Path $Root ('interactive-transfers/'+$Checkpoint.generation))
+        if(Test-Path -LiteralPath $stageRoot){throw 'Interactive publication generation already staged.'}
+        New-Item -ItemType Directory -Path $stageRoot -ErrorAction Stop|Out-Null
+    }
+    $repo=Join-Path $stageRoot 'transfer-restic';$tools=Join-Path $stageRoot 'transfer-tools';$archive=Join-Path $stageRoot 'transfer-encrypted.zip';$check=Join-Path $stageRoot 'transfer-readback';$receipts=Join-Path $stageRoot 'transfer-receipt'
     foreach($path in @($repo,$tools,$archive,$check,$receipts)){if(Test-Path -LiteralPath $path){throw 'Transfer must not replace an existing output.'}}
     $bytes=(Get-ChildItem -LiteralPath $directory -File -Recurse|Measure-Object Length -Sum).Sum
     if((Get-PSDrive E).Free -lt ($bytes+16GB)){throw 'Encrypted package free space insufficient.'}
@@ -160,7 +168,8 @@ function Restore-WindowsStateRoundtrip {
             if($actual.preferences.theme -cne $record.baseline.preferences.theme -or $actual.preferences.volume -ne $record.baseline.preferences.volume){throw 'Fresh-host application preferences mismatch.'}
         } finally {Remove-PSSession $session}
         $holdVerified=$true
-        [pscustomobject]@{generation=$ExpectedGeneration;vmId=$id.ToString();producerHost=$record.producer_host;consumerHost=$outerId;sourceRun=$record.producer_run;consumerRun=$env:GITHUB_RUN_ID;boot=$true;program=$actual.programVersion;documentSha256=$actual.documentSha256;preferences=$actual.preferences;windowsHideFileExt=$actual.windowsHideFileExt;machineGuid=$actual.machineGuid;freshHostRestored=$true}
+        $originGeneration=if($record.PSObject.Properties.Name -contains 'origin_generation'){[string]$record.origin_generation}else{$ExpectedGeneration}
+        [pscustomobject]@{root=$root;vmName=$name;originGeneration=$originGeneration;generation=$ExpectedGeneration;vmId=$id.ToString();producerHost=$record.producer_host;consumerHost=$outerId;sourceRun=$record.producer_run;consumerRun=$env:GITHUB_RUN_ID;boot=$true;program=$actual.programVersion;documentSha256=$actual.documentSha256;preferences=$actual.preferences;windowsHideFileExt=$actual.windowsHideFileExt;machineGuid=$actual.machineGuid;freshHostRestored=$true}
     } finally {
         if(-not $HoldForOperator -or -not $holdVerified){
             if(Get-VM -Id $id -ErrorAction SilentlyContinue){Remove-WindowsStateProbe -Root $root -VmName $name}
