@@ -216,7 +216,7 @@ jobs:
       - name: Start outbound independent Desktop Commander session and publish encrypted pairing
         uses: ./.github/actions/pilot-device
         env:
-          PILOT_RSA_MODULUS: 'yq+EoFfk2kB4AabphqIIu2R0CSj+/pErlSQNaSbaxX1e2ChKJR30VSwmk/2atZ3a/F+VMN2wdBgtisG8lmUDU6uXixgrcXOq09KvMyJMNJNBQFNzVdepj0BL+pd1issJXwswl+8oQ607fJ3upvGyLDfCNJXaLvieo3vEow3MVTak41jkI6oLxIRd/y5Ll3sYUg92NUDz907iryK1afQCVx+xrWPiLPkzXePqH1iHvW3+MY73jTC4ymxYYO5D7uDIXQ35Gt4aawkj5CEnHNmzrO9XVW3/O/4P/K8k6/n0fSgmMu91ormbHpFjfesu6a3Vruc7UHpl3tQJsWei5ABri+171C0nvAi0dzcyOA0ujtgxSY7qaR2wmATUs1a6wjzrLhva5GhejQaw91oMN56EqFFlTNyXxe8IoYP47RVX0TLi7/10g1Eluialm64yRsuRc66iS3H39oMtWy9B/prW3Z17gRC5VGW8HZarYCzRaZzrOV8pRHr34Kc2g/qbd2L7'
+          PILOT_RSA_MODULUS: 'kSFkr1dssDXH+LnyZYicgk5uxQP/SIk4JRwi4Zf5Lmql491A4exmAfuF4EF6td3uB19QGoGY/xmBrSOMnnupU9xinzPJf1nzMQu3BVtVZB8mADriTiEG7APoB2wstiDLyTn6odL3OOv0ofn2KS95b+IPbJI1LOK8/if6wBZMejk3kn4yFzbI9YdZ5nqdyVU8SOEmsfglkvzits2kF1fYEJSSDuiXTDD/9RRVj1YPzbzDTUDw/lIT5QKUgAba8K5e4+SyvPwlgPxjm7Y5QHPZfOOip2wD0OM87dscRmujH6iVRaBD8rCShqXVN3viOY1d8lp5n60Gk/U9VufJvH7RtZoMhW4/AFlghI5WC+3CRb9OUVRbx82+o6QblkN0RO0/QBF9efAIwLiZXySlFhIWwC1OFqX49p/zMyv5Kf2kZNR/Uu8nbLV3vfeeDhFI5IIUlGhfiHz8keWlkEUfXRN7UITPwV0IV/sZtNMSv3+QMxam3+G4f+ps52s2ke3Jv+GP'
 
   process-probe:
     if: github.event_name == 'workflow_dispatch' && inputs.transfer_phase == 'process-probe'
