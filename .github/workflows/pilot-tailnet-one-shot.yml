@@ -1,0 +1,33 @@
+# SINGLE-USE, pilot branch only. NEVER call the original DevBox or auto-chain it.
+# This event is one controlled owner-approved launch, not a recurring restart.
+name: One-time isolated tailnet kickoff
+on:
+  push:
+    branches:
+      - pilot/windows-home-connection-20261015
+    paths:
+      - '.github/workflows/pilot-tailnet-one-shot.yml'
+permissions:
+  contents: read
+jobs:
+  kickoff:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/pilot/windows-home-connection-20261015' && github.event.head_commit.message == 'chore(pilot): trigger one bounded tailnet login test'
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Dispatch exactly one isolated short tailnet-only test
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'dougmcdonald87/dougs-box'
+          test "$GITHUB_REF" = 'refs/heads/pilot/windows-home-connection-20261015'
+          gh workflow run 'windows-state-probe-validate.yml' \
+            --repo "$GH_REPO" \
+            --ref 'pilot/windows-home-connection-20261015' \
+            --field transfer_phase=tailnet-preflight
+          echo 'PILOT_ONE_SHOT_TAILNET_DISPATCH_REQUEST_ACCEPTED=true'
