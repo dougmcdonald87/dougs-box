@@ -25,7 +25,7 @@ on:
       transfer_phase:
         description: 'Isolated native probe, encrypted whole Windows producer, or independently fresh restore'
         type: choice
-        options: [probe, publish, restore, restore-hold, transport-probe, operator, process-probe, artifact-probe]
+        options: [probe, publish, restore, restore-hold, tailnet-preflight, transport-probe, operator, process-probe, artifact-probe]
         default: probe
       transport_full_part:
         description: 'Use a full512MiB random non-user probe payload instead of32bytes'
@@ -271,6 +271,51 @@ jobs:
           if($LASTEXITCODE -ne 0){throw 'Official SDK installation failed.'}
       - name: Publish harmless dummy artifact from within one running Node action
         uses: ./.github/actions/pilot-midstep
+
+  tailnet-preflight:
+    name: Pilot tailnet connection preflight (no VM)
+    if: github.event_name == 'workflow_dispatch' && inputs.transfer_phase == 'tailnet-preflight'
+    runs-on: ubuntu-latest
+    environment: devbox
+    timeout-minutes: 12
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      DEVBOX_ISOLATED_TEST: '1'
+      PILOT_TAILSCALE_OIDC_CLIENT_ID: 'Tf3m25iN2121CNTRL-k9nitZxGTS11CNTRL'
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - name: Test pilot-only workflow policy
+        shell: bash
+        run: |
+          python3 ./tests/windows-home-tailnet-preflight.tests.py
+          python3 ./tests/windows-home-tailnet-policy.tests.py
+      - name: Check GitHub OIDC identity for this pilot
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          if($env:GITHUB_REF -cne 'refs/heads/pilot/windows-home-connection-20261015'){throw 'Wrong branch.'}
+          ./scripts/windows-home-tailnet-oidc.ps1 -ClientId $env:PILOT_TAILSCALE_OIDC_CLIENT_ID
+      - name: Join isolated tailnet using the dedicated pilot identity
+        uses: tailscale/github-action@d1b6cd204f8dceda5b3eaad7f1f767be390056cd
+        with:
+          oauth-client-id: ${{ env.PILOT_TAILSCALE_OIDC_CLIENT_ID }}
+          audience: ${{ format('api.tailscale.com/{0}', env.PILOT_TAILSCALE_OIDC_CLIENT_ID) }}
+          tags: tag:windows-home-pilot
+          version: latest
+          hostname: windows-home-pilot-smoke-${{ github.run_id }}
+      - name: Verify private Tailscale IPv4 without Windows or RDP
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $ips=@(& tailscale ip -4)
+          if($LASTEXITCODE -ne 0){throw 'Pilot tailnet address unavailable.'}
+          $valid=@($ips|Where-Object {$_ -match '^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9]{1,3}\.[0-9]{1,3}$'})
+          if($valid.Count -ne 1){throw 'Expected exactly one tailnet IPv4.'}
+          Write-Output ('PILOT_TAILNET_PREFLIGHT_OK='+$valid[0])
 
   restore-hold:
     if: github.event_name == 'workflow_dispatch' && inputs.transfer_phase == 'restore-hold'
