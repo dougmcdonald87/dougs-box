@@ -14,7 +14,14 @@ $owner=Get-WindowsStateCheckpointOwner -Root $Root -VmId $VmId
 if($owner.name -cne ('DevBoxWindowsState-'+$origin.Groups[1].Value+'-'+$origin.Groups[2].Value) -or $owner.vm.State -ne 'Running'){throw 'Unexpected guest identity or state.'}
 $vmconnect=Join-Path $env:WINDIR 'System32\vmconnect.exe'
 if(-not(Test-Path -LiteralPath $vmconnect -PathType Leaf)){throw 'Hyper-V console executable missing.'}
-$rdpUser=Get-LocalUser -Name 'runneradmin' -ErrorAction Stop
+$statePath=Join-Path $env:DEVBOX_CONTROL_PATH 'rdp-state.txt'
+if(-not(Test-Path -LiteralPath $statePath -PathType Leaf)){throw 'RDP account setup receipt missing.'}
+$stateText=(Get-Content -LiteralPath $statePath -Raw -ErrorAction Stop).Trim()
+$accountMatch=[regex]::Match($stateText,'^rdpAccounts=(runneradmin|devbox)$')
+if(-not $accountMatch.Success){throw 'Unexpected RDP account receipt; account not authorized.'}
+$effectiveRdpAccount=$accountMatch.Groups[1].Value
+if($effectiveRdpAccount -cnotin @('runneradmin','devbox')){throw 'RDP account not allowlisted.'}
+$rdpUser=Get-LocalUser -Name $effectiveRdpAccount -ErrorAction Stop
 if(-not $rdpUser.Enabled){throw 'RDP owner account disabled.'}
 $dir=Join-Path $env:ProgramData ('WindowsHomePilot\'+$env:GITHUB_RUN_ID)
 if(Test-Path -LiteralPath $dir){throw 'Per-run control directory must be new.'}
