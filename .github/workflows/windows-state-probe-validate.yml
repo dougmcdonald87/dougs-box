@@ -185,7 +185,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.transfer_phase == 'operator'
     runs-on: windows-2025-vs2026
     environment: windows-home-pilot
-    timeout-minutes: 38
+    timeout-minutes: 340
     permissions:
       contents: read
     steps:
@@ -272,7 +272,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.transfer_phase == 'restore-hold'
     runs-on: windows-2025-vs2026
     environment: devbox
-    timeout-minutes: 55
+    timeout-minutes: 340
     permissions:
       contents: read
     env:
