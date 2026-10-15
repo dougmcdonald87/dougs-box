@@ -49,7 +49,7 @@ if(-not(Test-Path -LiteralPath $client -PathType Leaf)){throw 'Save/Finish helpe
 foreach($op in @('Save','Finish')){
  $link=$shell.CreateShortcut((Join-Path $desktop ('Windows 10 Home '+$op+'.lnk')))
  $link.TargetPath=Join-Path $env:WINDIR 'System32\WindowsPowerShell\v1.0\powershell.exe'
- $link.Arguments=('-NoProfile -ExecutionPolicy Bypass -File "'+$client+'" -Operation '+$op+' -ControlDir "'+$dir+'"')
+ $link.Arguments=('-NoExit -NoProfile -ExecutionPolicy Bypass -File "'+$client+'" -Operation '+$op+' -ControlDir "'+$dir+'"')
  $link.Description='Submit owner '+$op+'; only published encrypted receipt is success'
  $link.Save()
 }
