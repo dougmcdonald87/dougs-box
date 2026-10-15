@@ -1,0 +1,58 @@
+# Disposable Windows SID ACL probe only: no guest, no credentials, no Tailscale.
+name: Pilot Windows SID ACL regression probe
+on:
+  push:
+    branches: [pilot/windows-home-connection-20261015]
+    paths: ['.github/workflows/pilot-acl-sid-one-shot.yml']
+permissions:
+  contents: read
+jobs:
+  acl-probe:
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/pilot/windows-home-connection-20261015' &&
+      github.event.head_commit.message == 'test(pilot): isolate Windows ACL SID translation without guest restore'
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Reproduce SID string failure and verify typed SID replacement
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $account=Get-LocalUser -Name 'runneradmin' -ErrorAction Stop
+          $sids=@([Security.Principal.WindowsIdentity]::GetCurrent().User.Value,$account.SID.Value,'S-1-5-18')|Select-Object -Unique
+          $temp=Join-Path $env:RUNNER_TEMP ('pilot-acl-sid-'+$env:GITHUB_RUN_ID)
+          New-Item -Path $temp -ItemType Directory -ErrorAction Stop|Out-Null
+          $acl=Get-Acl -LiteralPath $temp
+          $acl.SetAccessRuleProtection($true,$false)
+          $oldFailed=$false
+          try{
+            foreach($sid in $sids){
+              $rule=[Security.AccessControl.FileSystemAccessRule]::new($sid,'FullControl','ContainerInherit,ObjectInherit','None','Allow')
+              $acl.AddAccessRule($rule)
+            }
+            Set-Acl -LiteralPath $temp -AclObject $acl -ErrorAction Stop
+          }catch{
+            $oldFailed=$true
+            Write-Output ('PILOT_UNTYPED_SID_ERROR='+$_.Exception.Message)
+          }
+          Write-Output ('PILOT_UNTYPED_SID_FAILED='+$oldFailed)
+          $acl=Get-Acl -LiteralPath $temp
+          $acl.SetAccessRuleProtection($true,$false)
+          foreach($sid in $sids){
+            $principal=[Security.Principal.SecurityIdentifier]::new($sid)
+            $rule=[Security.AccessControl.FileSystemAccessRule]::new($principal,'FullControl','ContainerInherit,ObjectInherit','None','Allow')
+            $acl.AddAccessRule($rule)
+          }
+          Set-Acl -LiteralPath $temp -AclObject $acl -ErrorAction Stop
+          $readback=Get-Acl -LiteralPath $temp
+          $actual=@($readback.GetAccessRules($true,$false,[Security.Principal.SecurityIdentifier])|ForEach-Object {$_.IdentityReference.Value}|Select-Object -Unique)
+          foreach($sid in $sids){if($actual -notcontains $sid){throw ('Typed ACL read-back missing SID '+$sid)}}
+          if(-not $readback.AreAccessRulesProtected){throw 'Restricted ACL inheritance is not protected.'}
+          Write-Output 'PILOT_TYPED_SID_ACL_ROUNDTRIP_OK=true'
+          Write-Output ('PILOT_SID_RULES_COUNT='+$sids.Count)
+          Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction Stop
+          if(-not $oldFailed){throw 'Original untyped SID fault did not reproduce: do not claim causal confirmation.'}
+          Write-Output 'PILOT_SID_CAUSE_REPRODUCED=true'
