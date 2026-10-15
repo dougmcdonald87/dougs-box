@@ -1,5 +1,7 @@
 import { DefaultArtifactClient } from '@actions/artifact';
-import { writeFile } from 'node:fs/promises';
+import { writeFile, readFile } from 'node:fs/promises';
+import { drainOperatorRequests } from './operator-worker.mjs';
+import { runOperatorPowerShell } from './operator-execution.mjs';
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { createPublicKey, publicEncrypt, constants } from 'node:crypto';
@@ -62,7 +64,29 @@ async function run() {
   // Reserve startup and cleanup time within the 340-minute pilot job.
   const deadline = Date.now() + 300 * 60000;
   try {
-    while (Date.now() < deadline && exitCode === null && !errorType) await sleep(10000);
+    const controlDir = process.env.WINDOWS_HOME_CONTROL_DIR;
+    let session = null;
+    if (controlDir) {
+      session = JSON.parse(await readFile(join(controlDir,'session.json'),'utf8'));
+      if (session.schema !== 1 || session.runId !== process.env.GITHUB_RUN_ID ||
+          !/^devbox-checkpoint-v1-ci-/.test(session.generation) || !Number.isSafeInteger(session.deadlineMs)) {
+        throw new Error('Refused mismatched scoped operator session.');
+      }
+      console.log('PILOT: local owner Save/Finish queue active; guest GUI still requires owner iPhone verification.');
+    }
+    while (Date.now() < deadline && exitCode === null && !errorType) {
+      if (session) {
+        const outcome = await drainOperatorRequests({
+          root:controlDir,session,
+          executor:request=>runOperatorPowerShell(request,{controlDir,workspace:process.env.GITHUB_WORKSPACE})
+        });
+        if (outcome.verifiedFinish) {
+          console.log('PILOT: encrypted Finish accepted; owner session ending.');
+          break;
+        }
+      }
+      await sleep(10000);
+    }
     if (exitCode !== null || errorType) throw new Error('Remote agent stopped during user-authorization hold.');
     console.log('PILOT: isolated terminal session expired at its 300-minute hold limit.');
   } finally {
