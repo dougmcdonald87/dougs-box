@@ -11,7 +11,9 @@ permissions:
   contents: read
 jobs:
   kickoff:
-    if: github.event_name == 'push' && github.ref == 'refs/heads/pilot/windows-home-connection-20261015' && github.event.head_commit.message == 'chore(pilot): trigger one bounded tailnet login test'
+    if: >-
+      github.event_name == 'push' && github.ref == 'refs/heads/pilot/windows-home-connection-20261015' &&
+      github.event.head_commit.message == 'chore(pilot): trigger one bounded tailnet login test'
     runs-on: ubuntu-latest
     timeout-minutes: 4
     permissions:
