@@ -383,6 +383,8 @@ jobs:
           $ErrorActionPreference='Stop'
           python ./tests/windows-home-rdp-receipt.tests.py
           if($LASTEXITCODE -ne 0){throw 'Pilot RDP receipt cross-step path tests failed; guest restore forbidden.'}
+          python ./tests/windows-home-sid-acl.tests.py
+          if($LASTEXITCODE -ne 0){throw 'Pilot SID-based control directory ACL regression test failed; guest restore forbidden.'}
       - name: Restore, boot and verify isolated Windows 10 Home guest without deleting verified VM
         id: restore_guest
         shell: pwsh
