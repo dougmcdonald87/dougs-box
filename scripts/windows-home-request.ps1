@@ -1,0 +1,31 @@
+# Owner command from authenticated HOST RDP session; no cloud credentials.
+[CmdletBinding()]
+param([Parameter(Mandatory)][ValidateSet('Save','Finish')][string]$Operation,
+      [Parameter(Mandatory)][string]$ControlDir)
+Set-StrictMode -Version Latest
+$ErrorActionPreference='Stop'
+$path=Join-Path $ControlDir 'session.json'
+if(-not(Test-Path -LiteralPath $path -PathType Leaf)){throw 'No active pilot session.'}
+$session=Get-Content -LiteralPath $path -Raw|ConvertFrom-Json
+if($session.schema -ne 1 -or $session.runId -cnotmatch '^[1-9][0-9]*$' -or
+   $session.vmId -cnotmatch '^[0-9a-f-]{36}$' -or
+   $session.deadlineMs -le [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()){
+ throw 'Pilot session expired or malformed; request not submitted.'
+}
+$id=[guid]::NewGuid().ToString('D')
+$request=[ordered]@{schema=1;runId=$session.runId;vmId=$session.vmId;generation=$session.generation;operation=$Operation;operationId=$id;createdUtc=[DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ss.fffZ')}
+$root=Join-Path $ControlDir 'requests'
+$temp=Join-Path $root ('.tmp-'+$id)
+$dest=Join-Path $root ('request-'+$id+'.json')
+[IO.File]::WriteAllText($temp,($request|ConvertTo-Json -Compress),[Text.UTF8Encoding]::new($false))
+[IO.File]::Move($temp,$dest)
+Write-Host ('Submitted '+$Operation+' request '+$id+'; submission does NOT prove persistence.')
+$response=Join-Path (Join-Path $ControlDir 'responses') ('response-'+$id+'.json')
+while($true){
+ if(Test-Path -LiteralPath $response){
+  $r=Get-Content -LiteralPath $response -Raw|ConvertFrom-Json
+  if($r.status -ceq 'verified' -and $r.verified -eq $true){Write-Host ('VERIFIED ENCRYPTED GENERATION: '+$r.generation);break}
+  if($r.status -ceq 'failed'){throw ('Operation failed: '+$r.reason)}
+ }
+ Start-Sleep -Seconds 5
+}
