@@ -19,6 +19,14 @@ This is a setup prerequisite, not authority for the assistant to change Tailscal
 
 Official references: https://tailscale.com/docs/integrations/github/github-action and https://tailscale.com/docs/features/workload-identity-federation . Note: Tailscale identity federation requires version >=1.90.1, the `auth_keys` scope, a configured tag, and GitHub `id-token: write` permissions.
 
+## First: small pilot Tailnet authentication test (no Windows VM)
+
+The owner reports that `tag:windows-home-pilot` and the new Tailscale OIDC credential with `auth_keys` Write are already configured. Do **not** ask them to create the tag again. The new public Client ID is already committed on the isolated pilot branch, so **do not** require a GitHub variable or personal access token.
+
+Before spending time restoring Windows, use the GitHub Actions workflow **Windows Home persistence probe guards** at https://github.com/dougmcdonald87/dougs-box/actions/workflows/windows-state-probe-validate.yml . Select branch `pilot/windows-home-connection-20261015`, then set **transfer_phase = tailnet-preflight** and click **Run workflow** once. This job runs on `ubuntu-latest`, is manual only, is limited to 12 minutes, requests only `contents: read` and `id-token: write`, and does **not** touch Windows, RDP, the restored guest or any original DevBox storage. GitHub-hosted runner usage may count against plan allowances.
+
+Evidence required in the single run logs: `PILOT_TAILNET_OIDC_CONTEXT_VERIFIED=true`, then `PILOT_TAILNET_PREFLIGHT_OK=100.x.x.x`. A successful Tailscale address proves pilot OIDC authentication and tag acceptance from GitHub, but **does not prove iPhone-to-RDP grant, Hyper-V guest GUI or persistent VM save**. If this fails, inspect only its error and correct that specific dependency; do not launch the long `restore-hold` to guess.
+
 ## Manual, bounded end-to-end acceptance (only after authorization)
 
 - Start `windows-state-probe-validate.yml` on the **pilot branch** with `transfer_phase=restore-hold`, `expected_generation=devbox-checkpoint-v1-ci-38647908553-1-20261014T225101Z-eb2366ef7dc34ea4aee45c30bbc721b6` and empty `expected_source_sha` (known pinned original source hash is selected internally). Do not launch the original `devbox.yml`.
