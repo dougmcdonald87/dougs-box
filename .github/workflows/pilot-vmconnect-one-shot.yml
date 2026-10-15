@@ -1,0 +1,42 @@
+# One-time VMConnect console management-tools test, no guest restoration.
+name: Pilot Hyper-V Console Tools Probe
+on:
+  push:
+    branches:
+      - pilot/windows-home-connection-20261015
+    paths:
+      - '.github/workflows/pilot-vmconnect-one-shot.yml'
+permissions:
+  contents: read
+jobs:
+  vmconnect-only:
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/pilot/windows-home-connection-20261015' &&
+      github.event.head_commit.message == 'test(pilot): run one isolated Hyper-V GUI tools feature probe'
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Inspect VMConnect and install only Hyper-V GUI management tools
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $candidate=Join-Path $env:WINDIR 'System32\vmconnect.exe'
+          Write-Output ('PILOT_VMCONNECT_PRESENT_BEFORE='+[bool](Test-Path -LiteralPath $candidate -PathType Leaf))
+          $feature=Get-WindowsFeature -Name 'RSAT-Hyper-V-Tools' -ErrorAction Stop
+          if(-not $feature){throw 'RSAT-Hyper-V-Tools not present on runner image; investigate image differences.'}
+          Write-Output ('PILOT_HYPERV_MANAGEMENT_BEFORE='+$feature.InstallState)
+          if(-not (Test-Path -LiteralPath $candidate -PathType Leaf)){
+            $result=Install-WindowsFeature -Name 'RSAT-Hyper-V-Tools' -ErrorAction Stop
+            Write-Output ('PILOT_GUI_TOOLS_INSTALL_SUCCESS='+$result.Success)
+            Write-Output ('PILOT_GUI_TOOLS_RESTART_NEEDED='+$result.RestartNeeded)
+            if(-not $result.Success -or $result.RestartNeeded -eq 'Yes'){throw 'Hyper-V Management Tools require reboot or failed; do not start a restored guest.'}
+          }
+          $after=(Test-Path -LiteralPath $candidate -PathType Leaf)
+          Write-Output ('PILOT_VMCONNECT_PRESENT_AFTER='+$after)
+          if(-not $after){throw 'VMConnect still absent after installation; narrow alternative required.'}
+          $metadata=Get-Item -LiteralPath $candidate -ErrorAction Stop
+          Write-Output ('PILOT_VMCONNECT_VERSION='+$metadata.VersionInfo.FileVersion)
+          Write-Output 'PILOT_VMCONNECT_READY=true'
