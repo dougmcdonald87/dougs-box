@@ -25,7 +25,7 @@ on:
       transfer_phase:
         description: 'Isolated native probe, encrypted whole Windows producer, or independently fresh restore'
         type: choice
-        options: [probe, publish, restore, transport-probe, operator, process-probe]
+        options: [probe, publish, restore, transport-probe, operator, process-probe, artifact-probe]
         default: probe
       transport_full_part:
         description: 'Use a full512MiB random non-user probe payload instead of32bytes'
@@ -290,3 +290,25 @@ jobs:
           Write-Output ('RUNNER_UNTRACKED_SURVIVED='+[bool]$untracked)
           if($tracked){Stop-Process -Id $tracked.Id -ErrorAction SilentlyContinue}
           if($untracked){Stop-Process -Id $untracked.Id -ErrorAction SilentlyContinue}
+
+  artifact-probe:
+    if: github.event_name == 'workflow_dispatch' && inputs.transfer_phase == 'artifact-probe'
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 12
+    permissions:
+      contents: read
+    steps:
+      - name: Prove mid-step artifact publication without terminating the host step
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          Set-Location $env:RUNNER_TEMP
+          npm install --no-fund --no-audit --ignore-scripts --no-save @actions/artifact@6.3.1
+          if($LASTEXITCODE -ne 0){throw 'Artifact toolkit installation failed'}
+          'harmless dummy text' | Set-Content -LiteralPath 'pilot-dummy.txt'
+          $code='const {DefaultArtifactClient}=require("@actions/artifact");new DefaultArtifactClient().uploadArtifact("pilot-midstep-"+process.env.GITHUB_RUN_ID,["pilot-dummy.txt"],{retentionDays:1}).then(r=>{console.log("PILOT_MIDSTEP_ARTIFACT_ID="+r.id)}).catch(e=>{console.error(e.message);process.exit(1)})'
+          node -e $code
+          if($LASTEXITCODE -ne 0){throw 'Midstep artifact publication failed'}
+          Write-Output 'PILOT MIDSTEP: dummy artifact published; still in same workflow step.'
+          Start-Sleep -Seconds 45
+          Write-Output 'PILOT MIDSTEP: same-step hold finished.'
