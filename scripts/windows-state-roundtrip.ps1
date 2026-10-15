@@ -88,7 +88,9 @@ function Restore-WindowsStateRoundtrip {
     param([Parameter(Mandatory)][string]$ExpectedGeneration,[switch]$HoldForOperator,[string]$ExpectedSourceSha='')
     if($ExpectedGeneration -cnotmatch '^devbox-checkpoint-v1-ci-([1-9][0-9]*)-([1-9][0-9]*)-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{32}$'){throw 'Only an exact isolated CI generation can be restored.'}
     $producerRun=$Matches[1];$producerAttempt=$Matches[2]
-    if($HoldForOperator -and $ExpectedSourceSha -cnotmatch '^[0-9a-f]{40}
+    if($HoldForOperator -and $ExpectedSourceSha -cnotmatch '^[0-9a-f]{40}$'){throw 'Pilot hold requires pinned producer source SHA.'}
+    if(-not $HoldForOperator -and $ExpectedSourceSha){throw 'Source override forbidden outside isolated hold.'}
+    $sourceSha=if($HoldForOperator){$ExpectedSourceSha}else{$env:GITHUB_SHA}
     Assert-WindowsStateRoundtripContext
     if($producerRun -ceq $env:GITHUB_RUN_ID){throw 'Consumer must be an independent run.'}
     $raw=& gh api ('repos/'+$env:GITHUB_REPOSITORY+'/actions/runs/'+$producerRun)
