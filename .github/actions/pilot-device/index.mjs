@@ -2,6 +2,7 @@ import { DefaultArtifactClient } from '@actions/artifact';
 import { writeFile, readFile } from 'node:fs/promises';
 import { drainOperatorRequests } from './operator-worker.mjs';
 import { runOperatorPowerShell } from './operator-execution.mjs';
+import { sandboxDeviceEnvironment } from './device-environment.mjs';
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { createPublicKey, publicEncrypt, constants } from 'node:crypto';
@@ -27,7 +28,7 @@ async function run() {
   const file = join(root, 'windows-home-pilot-pairing.encrypted.txt');
   const cmd = process.env.ComSpec || 'cmd.exe';
   const args = ['/d', '/s', '/c', 'npx --yes @wonderwhy-er/desktop-commander@0.2.52 remote --no-persist-session'];
-  const device = spawn(cmd, args, { cwd: root, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  const device = spawn(cmd, args, { cwd: root, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'], env: sandboxDeviceEnvironment(process.env) });
   let output = '';
   let exitCode = null;
   let errorType = null;
