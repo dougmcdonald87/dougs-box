@@ -282,6 +282,8 @@ jobs:
       id-token: write # only the dedicated, workflow-pinned pilot tailnet identity
     env:
       DEVBOX_ISOLATED_TEST: '1'
+      # Tailscale Client IDs are public identifiers, not access tokens.
+      PILOT_TAILSCALE_OIDC_CLIENT_ID: 'Tf3m25iN2121CNTRL-k9nitZxGTS11CNTRL'
       EXPECTED_WINDOWS_STATE_GENERATION: ${{ inputs.expected_generation }}
       EXPECTED_WINDOWS_STATE_SOURCE_SHA: ${{ inputs.expected_source_sha }}
     steps:
@@ -291,7 +293,7 @@ jobs:
       - name: Verify dedicated pilot tailnet OIDC identity before Windows restore
         shell: pwsh
         env:
-          PILOT_TAILSCALE_OIDC_CLIENT_ID: ${{ vars.PILOT_TAILSCALE_OIDC_CLIENT_ID }}
+          PILOT_TAILSCALE_OIDC_CLIENT_ID: ${{ env.PILOT_TAILSCALE_OIDC_CLIENT_ID }}
         run: |
           $ErrorActionPreference='Stop'
           if([string]::IsNullOrWhiteSpace($env:PILOT_TAILSCALE_OIDC_CLIENT_ID)){
@@ -301,8 +303,8 @@ jobs:
       - name: Join tailnet using separate isolated pilot credential
         uses: tailscale/github-action@d1b6cd204f8dceda5b3eaad7f1f767be390056cd # v4.2.0
         with:
-          oauth-client-id: ${{ vars.PILOT_TAILSCALE_OIDC_CLIENT_ID }}
-          audience: ${{ format('api.tailscale.com/{0}', vars.PILOT_TAILSCALE_OIDC_CLIENT_ID) }}
+          oauth-client-id: ${{ env.PILOT_TAILSCALE_OIDC_CLIENT_ID }}
+          audience: ${{ format('api.tailscale.com/{0}', env.PILOT_TAILSCALE_OIDC_CLIENT_ID) }}
           tags: tag:windows-home-pilot
           version: latest
           hostname: windows-home-pilot-${{ github.run_id }}
