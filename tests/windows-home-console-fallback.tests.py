@@ -11,4 +11,5 @@ class RdpAccountFallback(unittest.TestCase):
   self.assertIn("@('runneradmin','devbox')",console)
   self.assertIn('Get-LocalUser -Name $effectiveRdpAccount',console)
   self.assertNotIn("Get-LocalUser -Name 'runneradmin'",console)
+  self.assertIn("-NoExit -NoProfile -ExecutionPolicy Bypass",console)
 if __name__=='__main__':unittest.main()
