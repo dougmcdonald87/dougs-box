@@ -6,14 +6,14 @@
 
 `scripts/check-tailscale-oidc.ps1` explicitly validates the original production workflow as `dougmcdonald87/dougs-box/.github/workflows/devbox.yml@refs/heads/main`. Its federated identity is not a valid credential for an unrelated branch/workflow. The Windows Home pilot needs its own trust credential, scoped to its own workflow and identity.
 
-The pilot `restore-hold` job now fails **before** restoring the guest if `PILOT_TAILSCALE_OIDC_CLIENT_ID` is absent. That prevents a long-running, inaccessible VM session.
+The pilot `restore-hold` job now directly specifies the **separate public Tailscale OIDC Client ID** provided by the owner (pilot branch only), so no GitHub Actions variable creation is needed. The workflow performs an OIDC preflight and refuses to restore the guest unless its pilot-specific identity claims match. **A Client ID is not proof that Tailscale has the tag, grants, or correct credential scopes.**
 
 ## One-time external requirements — owner/admin controls
 
 1. In the Tailscale admin console, create a **separate** tag `tag:windows-home-pilot` rather than reusing the original `tag:github-devbox` identity. Do not weaken any existing Grants or tag ownership.
 2. Create a new federated identity credential with the writable `auth_keys` scope and the exact pilot tag. Bind to GitHub Actions OIDC issuer `https://token.actions.githubusercontent.com`, the environment `devbox` subject `repo:dougmcdonald87@220090710/dougs-box@1414179011:environment:devbox`, and workflow reference `dougmcdonald87/dougs-box/.github/workflows/windows-state-probe-validate.yml@refs/heads/pilot/windows-home-connection-20261015`. Its audience is the value supplied by Tailscale; the code expects `api.tailscale.com/<dedicated client ID>`.
 3. Add only the minimally necessary policy allowing the owner's already-authorized iPhone tailnet identity to reach `tag:windows-home-pilot` on TCP port 3389. Do not allow public RDP or broad tailnet access. The Windows firewall also restricts incoming RDP to Tailscale's 100.64.0.0/10 range.
-4. Put the **new dedicated client ID** in the GitHub repository or `devbox` Environment Actions variable `PILOT_TAILSCALE_OIDC_CLIENT_ID`. Do not paste credentials into the repo or the handover. Do not replace `DEVBOX_OIDC_CLIENT_ID`.
+4. **GitHub Client ID wiring is already completed on the isolated pilot branch**. Do not create a GitHub variable, paste a GitHub personal access token, change the original `DEVBOX_OIDC_CLIENT_ID`, or add an OAuth client secret. Verify that the pilot Tailscale credential itself has `auth_keys` write scope restricted to `tag:windows-home-pilot`, that the tag exists and is owned, and that the iPhone has only the necessary private RDP grant.
 
 This is a setup prerequisite, not authority for the assistant to change Tailscale's trust settings or create a billable GitHub-hosted Windows run.
 
