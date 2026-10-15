@@ -362,6 +362,11 @@ jobs:
           $ip=@($ipOutput|Where-Object {$_ -match '^100\.(6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9]{1,3}\.[0-9]{1,3}$'})
           if($ip.Count -ne 1){throw 'Expected exactly one private Tailscale IPv4 address.'}
           Write-Output ('ISOLATED_PILOT_TAILSCALE_IP='+$ip[0])
+      - name: Ensure Windows Home Hyper-V graphical console without guest restore
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          ./scripts/ensure-windows-home-vmconnect.ps1
       - name: Configure pilot RDP using existing devbox environment secret
         shell: pwsh
         env:
