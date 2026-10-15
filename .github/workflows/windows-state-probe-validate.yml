@@ -192,6 +192,22 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
           persist-credentials: false
+      - name: Configure pilot RDP from environment secret (never print password)
+        shell: pwsh
+        env:
+          PILOT_RDP_PASSWORD: ${{ secrets.PILOT_RDP_PASSWORD }}
+        run: |
+          $ErrorActionPreference='Stop'
+          if ([string]::IsNullOrWhiteSpace($env:PILOT_RDP_PASSWORD)) {
+            throw 'Pilot RDP password not configured in windows-home-pilot Environment.'
+          }
+          $env:DEVBOX_CONTROL_PATH = Join-Path $env:RUNNER_TEMP 'windows-home-pilot-rdp'
+          New-Item -Path $env:DEVBOX_CONTROL_PATH -ItemType Directory -Force | Out-Null
+          $secure = ConvertTo-SecureString -String $env:PILOT_RDP_PASSWORD -AsPlainText -Force
+          ./scripts/configure-rdp.ps1 -Password $secure
+          Remove-Variable secure -ErrorAction SilentlyContinue
+          Write-Output 'PILOT: RDP startup script finished; login remains the GitHub Environment secret.'
+
       - name: Install official artifact SDK for disposable device action
         shell: pwsh
         run: |
