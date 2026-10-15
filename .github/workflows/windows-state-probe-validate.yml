@@ -202,6 +202,8 @@ jobs:
           $rsa.ImportParameters($params)
           $out = Join-Path $env:RUNNER_TEMP 'pilot-agent.stdout'
           $err = Join-Path $env:RUNNER_TEMP 'pilot-agent.stderr'
+          # Suppress GitHub's interim orphan cleanup for this one bounded pilot process.
+          $env:RUNNER_TRACKING_ID = ''
           $agent = Start-Process -FilePath 'cmd.exe' -ArgumentList @('/d', '/s', '/c', 'npx --yes @wonderwhy-er/desktop-commander@latest remote --no-persist-session') -WorkingDirectory $env:RUNNER_TEMP -RedirectStandardOutput $out -RedirectStandardError $err -PassThru
           Write-Output 'PILOT AGENT: outbound-only boot attempted; waiting for pairing.'
           $prompt = ''
@@ -210,10 +212,13 @@ jobs:
             $stdout = if (Test-Path -LiteralPath $out) { Get-Content -LiteralPath $out -Raw -ErrorAction SilentlyContinue } else { '' }
             $stderr = if (Test-Path -LiteralPath $err) { Get-Content -LiteralPath $err -Raw -ErrorAction SilentlyContinue } else { '' }
             $prompt = [string]$stdout + "`n" + [string]$stderr
-            if ($prompt -match '(?i)verification|verify your device|device code|user code|mcp\.desktopcommander\.app|desktopcommander\.app/device') { break }
+            # A request-in-progress is NOT a delivered device code.
+            if ($prompt -match '(?i)code expires in|waiting for authorization') { break }
             if ($agent.HasExited) { break }
           }
           if ([string]::IsNullOrWhiteSpace($prompt)) { throw 'Device agent produced no diagnostics.' }
+          $ready = ($prompt -match '(?i)code expires in|waiting for authorization')
+          $ready | Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'pilot-pairing-ready.txt')
           $bytes = [Text.Encoding]::UTF8.GetBytes($prompt)
           $artifact = Join-Path $env:RUNNER_TEMP 'pilot-encrypted-pairing.txt'
           'PILOT_ENCRYPTED_PAIRING_BEGIN' | Set-Content -LiteralPath $artifact -Encoding utf8
@@ -242,6 +247,8 @@ jobs:
       - name: Hold independent terminal for up to 30 minutes
         shell: pwsh
         run: |
+          $ready = [bool]::Parse((Get-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'pilot-pairing-ready.txt') -Raw).Trim())
+          if (-not $ready) { throw 'No complete Desktop Commander device code was issued before startup timeout.' }
           $agentId = [int](Get-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'pilot-agent.pid') -Raw)
           Write-Output 'PILOT: encrypted pairing artifact uploaded; waiting for device approval.'
           $deadline = [DateTime]::UtcNow.AddMinutes(30)
