@@ -45,7 +45,13 @@ function Publish-WindowsStateRoundtrip {
            $info.root -cne $Root -or $info.deadlineMs -le [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()){
             throw 'Pilot session identity/deadline mismatch.'
         }
-        $origin=[regex]::Match([string]$info.originGeneration,'^devbox-checkpoint-v1-ci-([1-9][0-9]*)-([1-9][0-9]*)-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{32}
+        $origin=[regex]::Match([string]$info.originGeneration,'^devbox-checkpoint-v1-ci-([1-9][0-9]*)-([1-9][0-9]*)-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{32}$')
+        if(-not $origin.Success -or $owner.name -cne ('DevBoxWindowsState-'+$origin.Groups[1].Value+'-'+$origin.Groups[2].Value)){throw 'Original VM lineage mismatch.'}
+        if(-not $Checkpoint -or $Checkpoint.mode -cnotin @('save','finish')){throw 'Invalid interactive checkpoint mode.'}
+    } elseif(-not $Checkpoint -or $Checkpoint.mode -cne 'finish'){throw 'Original producer publishes clean Finish only.'}
+    $expectedState=if($Checkpoint.mode -ceq 'save'){'Running'}else{'Off'}
+    if($owner.vm.State -ne $expectedState -or $Checkpoint.vmId -cne $VmId.ToString() -or
+       -not $Checkpoint.exportVerified -or $Checkpoint.published){throw 'Only owned verified Save or clean Finish may publish.'}
     $manifest=Assert-WindowsStateOwnedPath -Root $Root -Path $Checkpoint.manifestPath
     $payload=Assert-WindowsStateOwnedPath -Root $Root -Path $Checkpoint.exportPath
     $directory=Split-Path $manifest -Parent
