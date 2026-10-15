@@ -63,6 +63,7 @@ async function run() {
   console.log('PILOT: ready for user approval; keeping agent alive in this same GitHub action.');
   // Reserve startup and cleanup time within the 340-minute pilot job.
   const deadline = Date.now() + 300 * 60000;
+  let completedFinish = false;
   try {
     const controlDir = process.env.WINDOWS_HOME_CONTROL_DIR;
     let session = null;
@@ -81,6 +82,7 @@ async function run() {
           executor:request=>runOperatorPowerShell(request,{controlDir,workspace:process.env.GITHUB_WORKSPACE})
         });
         if (outcome.verifiedFinish) {
+          completedFinish = true;
           console.log('PILOT: encrypted Finish accepted; owner session ending.');
           break;
         }
@@ -88,7 +90,7 @@ async function run() {
       await sleep(10000);
     }
     if (exitCode !== null || errorType) throw new Error('Remote agent stopped during user-authorization hold.');
-    console.log('PILOT: isolated terminal session expired at its 300-minute hold limit.');
+    if (!completedFinish) console.log('PILOT: isolated terminal hold ended without a verified Finish.');
   } finally {
     // Windows cmd.exe may spawn npx and a grandchild agent. Stop the entire tree.
     if (exitCode === null && !errorType) {
