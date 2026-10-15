@@ -304,6 +304,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
+          $env:DEVBOX_CONTROL_PATH=Join-Path $env:RUNNER_TEMP 'windows-home-restore-hold-rdp'
           if($env:GITHUB_REF -cne 'refs/heads/pilot/windows-home-connection-20261015'){throw 'Only manual isolated pilot branch may restore and offer operator controls.'}
           $seed='devbox-checkpoint-v1-ci-38647908553-1-20261014T225101Z-eb2366ef7dc34ea4aee45c30bbc721b6'
           $sha=if($env:EXPECTED_WINDOWS_STATE_GENERATION -ceq $seed){'5f13bc6fa567fdcdea5342a7481cb679a4a8b5e9'}else{$env:EXPECTED_WINDOWS_STATE_SOURCE_SHA}
