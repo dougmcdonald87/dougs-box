@@ -131,6 +131,7 @@ function Restore-WindowsStateRoundtrip {
     $directory=Join-Path $root ('checkpoints/'+$record.generation)
     Move-Item -LiteralPath $originalDirectory -Destination $directory -ErrorAction Stop
     @{schema=1;root=$root;name=$name;vmId=$id.ToString();status='created'}|ConvertTo-Json|Set-Content -LiteralPath (Join-Path $root 'probe-owner.json') -Encoding utf8
+    $holdVerified=$false
     try {
         $vm=Import-WindowsStateCheckpoint -Root $root -VmId $id -ExportPath (Join-Path $directory 'payload') -ManifestPath (Join-Path $directory 'manifest.json')
         Start-VM -VM $vm -ErrorAction Stop
@@ -143,9 +144,10 @@ function Restore-WindowsStateRoundtrip {
             foreach($property in @('machineName','machineGuid','programPath','programVersion','documentSha256','windowsHideFileExt')){if($actual.$property -cne $record.baseline.$property){throw ('Fresh-host fixture mismatch: '+$property)}}
             if($actual.preferences.theme -cne $record.baseline.preferences.theme -or $actual.preferences.volume -ne $record.baseline.preferences.volume){throw 'Fresh-host application preferences mismatch.'}
         } finally {Remove-PSSession $session}
+        $holdVerified=$true
         [pscustomobject]@{generation=$ExpectedGeneration;vmId=$id.ToString();producerHost=$record.producer_host;consumerHost=$outerId;sourceRun=$record.producer_run;consumerRun=$env:GITHUB_RUN_ID;boot=$true;program=$actual.programVersion;documentSha256=$actual.documentSha256;preferences=$actual.preferences;windowsHideFileExt=$actual.windowsHideFileExt;machineGuid=$actual.machineGuid;freshHostRestored=$true}
     } finally {
-        if(-not $HoldForOperator -or -not $actual){
+        if(-not $HoldForOperator -or -not $holdVerified){
             if(Get-VM -Id $id -ErrorAction SilentlyContinue){Remove-WindowsStateProbe -Root $root -VmName $name}
         } else {
             Write-Output ('ISOLATED_VERIFIED_GUEST_HELD='+$name)
