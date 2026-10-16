@@ -25,7 +25,7 @@ on:
       transfer_phase:
         description: 'Isolated native probe, encrypted whole Windows producer, or independently fresh restore'
         type: choice
-        options: [probe, publish, restore, restore-hold, tailnet-preflight, transport-probe, operator, process-probe, artifact-probe, restricted-agent-probe, live-host-probe, restore-live-save-probe, owner-policy-tests, guest-network-probe]
+        options: [native-compatibility, probe, publish, restore, restore-hold, tailnet-preflight, transport-probe, operator, process-probe, artifact-probe, restricted-agent-probe, live-host-probe, restore-live-save-probe, owner-policy-tests, guest-network-probe]
         default: probe
       transport_full_part:
         description: 'Use a full512MiB random non-user probe payload instead of32bytes'
@@ -633,3 +633,17 @@ jobs:
           . ./scripts/windows-state-roundtrip.ps1
           $result=Restore-WindowsStateRoundtrip -ExpectedGeneration $env:EXPECTED_GENERATION -ExpectedSourceSha $env:EXPECTED_SOURCE_SHA -VerifyLiveSave -ProbeGuestNetwork
           Write-Output ('NATIVE_DISPOSABLE_GUEST_NETWORK='+($result|ConvertTo-Json -Depth 5 -Compress))
+
+  native-compatibility:
+    if: github.event_name == 'workflow_dispatch' && inputs.transfer_phase == 'native-compatibility' && github.ref == 'refs/heads/pilot/windows-home-connection-20261015'
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 8
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - name: Reproduce native missing-switch source with disposable diskless VM
+        shell: pwsh
+        run: ./tests/windows-state-native-compatibility.ps1

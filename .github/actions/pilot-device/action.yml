@@ -1,4 +1,0 @@
-name: Independent Windows Home pilot terminal
-runs:
-  using: node24
-  main: index.mjs
