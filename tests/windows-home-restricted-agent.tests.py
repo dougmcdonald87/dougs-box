@@ -28,6 +28,14 @@ class RestrictedAgentStaticPolicy(unittest.TestCase):
             self.assertIn(marker, self.source)
         self.assertNotRegex(self.source, r'(?i)DEVBOX_RDP_PASSWORD.*write-host')
 
+    def test_privileged_workspace_not_modifiable_by_remote_account(self):
+        for marker in ['WorkspaceRoot', 'workspaceWriteDenied', 'trustedCodeWriteDenied', 'windows-state-operator.ps1']:
+            self.assertIn(marker, self.source)
+
+    def test_guest_marker_cannot_be_read_or_written_by_remote_account(self):
+        for marker in ['probe-owner.json', 'guestMarkerDenied']:
+            self.assertIn(marker, self.source)
+
     def test_no_mutation_of_guest_acl_or_production(self):
         self.assertNotRegex(self.source, r'(?i)Set-Acl[^\n]*(?:GuestRoot|probe-|E:|DevBox)')
         self.assertNotIn('devbox.yml', self.source)
