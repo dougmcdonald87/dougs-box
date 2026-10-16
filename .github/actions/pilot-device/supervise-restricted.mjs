@@ -45,7 +45,7 @@ export async function supervise(){
  const rsa=createPublicKey({key:{kty:'RSA',n:Buffer.from(process.env.PILOT_RSA_MODULUS,'base64').toString('base64url'),e:'AQAB'},format:'jwk'});
  const script=join(workspace,'scripts','windows-home-restricted-agent.ps1');
  const child=spawnTask('pwsh.exe',['-NoProfile','-NonInteractive','-File',script,
-  '-ControlDir',controlDir,'-GuestRoot',session.root,'-LaunchAgent'],
+  '-ControlDir',controlDir,'-GuestRoot',session.root,'-WorkspaceRoot',workspace,'-LaunchAgent'],
   {cwd:workspace,stdio:['ignore','pipe','pipe'],env:process.env});
  let output='',exited=false;
  // Never forward raw device-code output to GitHub Actions logs.
