@@ -1,0 +1,12 @@
+// Supplemental fragment, NOT a replacement for the existing tailnet policy.
+// Replace owner@example.com with the exact signed-in owner's identity.
+// Merge these entries into existing arrays while retaining RDP/storage rules.
+{
+  "grants": [
+    { "src": ["owner@example.com"], "dst": ["tag:github-devbox"], "ip": ["tcp:22"] },
+    { "src": ["tag:github-devbox"], "dst": ["tag:github-devbox"], "ip": ["tcp:22"] }
+  ],
+  "ssh": [
+    { "action": "check", "src": ["owner@example.com"], "dst": ["tag:github-devbox"], "users": ["root"] }
+  ]
+}

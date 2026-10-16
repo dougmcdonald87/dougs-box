@@ -1,0 +1,21 @@
+{
+  "$schema": "",
+  "_comment": "Fill on the storage host as config/persistence.json (gitignored). NO secrets here: the restic password lives only in the GitHub 'devbox' Environment as RESTIC_PASSWORD.",
+  "rest_server": {
+    "download_url": "https://github.com/restic/rest-server/releases/latest/download/rest-server-windows-amd64.zip",
+    "install_dir": "C:\\DevBox-Storage\\rest-server",
+    "data_path": "C:\\DevBox-Storage\\data",
+    "listen_port": 8000,
+    "bind_policy": "tailscale-ip-only",
+    "append_only": true,
+    "no_auth": true,
+    "max_size_gib": 0
+  },
+  "restic_repo_name": "devbox",
+  "canary_file": "canary/DEVBOX-CANARY.txt",
+  "smb": {
+    "enabled": false,
+    "share_name": "DevBoxCold",
+    "share_path": "C:\\DevBox-Cold"
+  }
+}
