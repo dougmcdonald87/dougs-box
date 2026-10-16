@@ -7,7 +7,7 @@ $session=Get-Content -LiteralPath (Join-Path $control 'session.json') -Raw|Conve
 if($session.runId -cne $expectedRun -or [guid]$session.vmId -ne $expectedVm){throw 'Live pilot identity mismatch; no action allowed.'}
 $vm=Get-VM -Id $expectedVm -ErrorAction Stop
 
-+$operationId='292e0186-46e3-4b31-a488-4224285e486b'
+$operationId='292e0186-46e3-4b31-a488-4224285e486b'
 $requestPath=Join-Path (Join-Path $control 'requests') ('request-'+$operationId+'.json')
 $responsePath=Join-Path (Join-Path $control 'responses') ('response-'+$operationId+'.json')
 if(-not(Test-Path -LiteralPath $requestPath) -and -not(Test-Path -LiteralPath ($requestPath+'.working')) -and -not(Test-Path -LiteralPath $responsePath)){
