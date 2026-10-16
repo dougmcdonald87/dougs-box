@@ -5,7 +5,8 @@ param(
     [switch]$ChildProbe,
     [switch]$LaunchAgent,
     [string]$ControlDir,
-    [string]$GuestRoot
+    [string]$GuestRoot,
+    [string]$WorkspaceRoot
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -43,10 +44,32 @@ if ($ChildProbe) {
     } catch [System.UnauthorizedAccessException] {
         $guestDenied = $true
     }
+    # Verify exact files and workspace write access, not directory enumeration alone.
+    $guestMarkerDenied = $false
+    try {
+        $markerHandle = [IO.File]::OpenRead((Join-Path $GuestRoot 'probe-owner.json'))
+        $markerHandle.Dispose()
+    } catch [System.UnauthorizedAccessException] { $guestMarkerDenied = $true }
+    $trustedCodeWriteDenied = $false
+    try {
+        $trustedPath = Join-Path $WorkspaceRoot 'scripts/windows-state-operator.ps1'
+        $trustedHandle = [IO.File]::Open($trustedPath,[IO.FileMode]::Open,[IO.FileAccess]::Write,[IO.FileShare]::ReadWrite)
+        $trustedHandle.Dispose()
+    } catch [System.UnauthorizedAccessException] { $trustedCodeWriteDenied = $true }
+    $workspaceWriteDenied = $false
+    $testFile = Join-Path $WorkspaceRoot ('.pilot-denial-'+[guid]::NewGuid().ToString('N'))
+    try {
+        $newHandle = [IO.File]::Open($testFile,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+        $newHandle.Dispose()
+        [IO.File]::Delete($testFile)
+    } catch [System.UnauthorizedAccessException] { $workspaceWriteDenied = $true }
     [pscustomobject]@{
         sid=$identity.User.Value
         controllDenied=$controllDenied
         guestDenied=$guestDenied
+        guestMarkerDenied=$guestMarkerDenied
+        trustedCodeWriteDenied=$trustedCodeWriteDenied
+        workspaceWriteDenied=$workspaceWriteDenied
         privilegeDenied=$privilegeDenied
         envClean=$envClean
     } | ConvertTo-Json -Compress
@@ -77,6 +100,7 @@ if ($session.schema -ne 1 -or $session.runId -cne $env:GITHUB_RUN_ID -or
     throw 'Missing, expired or mismatched guest state.'
 }
 if (-not (Test-Path -LiteralPath $GuestRoot -PathType Container)) { throw 'Guest root unavailable.' }
+if ($WorkspaceRoot -cne $env:GITHUB_WORKSPACE -or -not (Test-Path -LiteralPath $WorkspaceRoot -PathType Container)) { throw 'Untrusted workspace root.' }
 # Account name is unique within one short-lived runner, not a persistent credential.
 $name = 'PilotDC' + $env:GITHUB_RUN_ID.Substring([Math]::Max(0,$env:GITHUB_RUN_ID.Length-8))
 if (Get-LocalUser -Name $name -ErrorAction SilentlyContinue) { throw 'Restricted account already exists.' }
@@ -113,7 +137,7 @@ try {
         if (-not [string]::IsNullOrWhiteSpace($value)) { $psi.Environment[$key] = $value }
     }
     foreach ($arg in @('-NoProfile','-NonInteractive','-File',$PSCommandPath,'-ChildProbe',
-                     '-ControlDir',$ControlDir,'-GuestRoot',$GuestRoot)) { [void]$psi.ArgumentList.Add($arg) }
+                     '-ControlDir',$ControlDir,'-GuestRoot',$GuestRoot,'-WorkspaceRoot',$WorkspaceRoot)) { [void]$psi.ArgumentList.Add($arg) }
     $process = [Diagnostics.Process]::Start($psi)
     if (-not $process.WaitForExit(30000)) {
         $process.Kill($true)
@@ -125,6 +149,8 @@ try {
     $rows = @($output.Trim() | ConvertFrom-Json -ErrorAction Stop)
     if ($rows.Count -ne 1 -or $rows[0].sid -cne $account.SID.Value -or
         $rows[0].controllDenied -ne $true -or $rows[0].guestDenied -ne $true -or
+        $rows[0].guestMarkerDenied -ne $true -or $rows[0].workspaceWriteDenied -ne $true -or
+        $rows[0].trustedCodeWriteDenied -ne $true -or
         $rows[0].privilegeDenied -ne $true -or $rows[0].envClean -ne $true) {
         throw 'Restricted user can reach privileged data or identity is unverified.'
     }
