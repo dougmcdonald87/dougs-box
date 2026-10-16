@@ -21,5 +21,4 @@ $p=Join-Path $files[0].DirectoryName 'payload'
 $dirs=@($m.disks|ForEach-Object {Split-Path (Join-Path $p $_.path) -Parent}|Sort-Object -Unique)
 if($dirs.Count -ne 1){throw 'Disk layout refused.'}
 $r=Compare-VM -Path (Join-Path $p $m.config) -Copy -VhdSourcePath $dirs[0] -VirtualMachinePath (Join-Path $root $m.vm_name) -VhdDestinationPath (Join-Path $root 'restored-disks') -SnapshotFilePath (Join-Path $root 'restored-snapshots') -ErrorAction Stop
-$r=Resolve-WindowsStateImportCompatibility -Report $r -ExpectedVmId $id -ExpectedName 'DevBoxWindowsState-38647908553-1' -ExpectedVersion '12.0'
-[ordered]@{runId='38971777364';correctionOnly=$true;remainingIssues=@($r.Incompatibilities).Count;vmId=[string]$r.VM.Id;vmName=$r.VM.Name;version=[string]$r.VM.Version}|ConvertTo-Json -Compress
+[ordered]@{runId='38971777364';diagnosticOnly=$true;issues=@($r.Incompatibilities|ForEach-Object {$x=$_.Source;[ordered]@{messageId=$_.MessageId;type=$x.GetType().FullName;typeNames=@($x.PSObject.TypeNames);properties=@($x.PSObject.Properties|Where-Object {$_.Name -match 'Id|Name|Switch'}|ForEach-Object {@{name=$_.Name;value=[string]$_.Value}})}})}|ConvertTo-Json -Depth 7 -Compress
