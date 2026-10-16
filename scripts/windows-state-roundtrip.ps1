@@ -198,12 +198,12 @@ function Restore-WindowsStateRoundtrip {
             foreach($property in @('machineName','machineGuid','programPath','programVersion','documentSha256','windowsHideFileExt')){if($actual.$property -cne $record.baseline.$property){throw ('Fresh-host fixture mismatch: '+$property)}}
             if($actual.preferences.theme -cne $record.baseline.preferences.theme -or $actual.preferences.volume -ne $record.baseline.preferences.volume){throw 'Fresh-host application preferences mismatch.'}
         } finally {Remove-PSSession $session}
-        if($activeSave){Assert-WindowsStateLiveProducer -ProducerRun $producerRun -ProducerAttempt $producerAttempt -SourceSha $sourceSha}
         if($ProbeGuestNetwork){
             . (Join-Path $PSScriptRoot 'windows-home-network-probe.ps1')
             $networkProof=Test-WindowsHomeGuestNetwork -VmId $id -Credential $credential
             if($networkProof.verified -ne $true){throw ('Disposable guest network probe refused at '+$networkProof.stage)}
         }
+        if($activeSave){Assert-WindowsStateLiveProducer -ProducerRun $producerRun -ProducerAttempt $producerAttempt -SourceSha $sourceSha}
         $holdVerified=$true
         $originGeneration=if($record.PSObject.Properties.Name -contains 'origin_generation'){[string]$record.origin_generation}else{$ExpectedGeneration}
         [pscustomobject]@{root=$root;vmName=$name;originGeneration=$originGeneration;generation=$ExpectedGeneration;vmId=$id.ToString();producerHost=$record.producer_host;consumerHost=$outerId;sourceRun=$record.producer_run;consumerRun=$env:GITHUB_RUN_ID;boot=$true;program=$actual.programVersion;documentSha256=$actual.documentSha256;preferences=$actual.preferences;windowsHideFileExt=$actual.windowsHideFileExt;machineGuid=$actual.machineGuid;freshHostRestored=$true;guestNetworkProbe=$networkProof}

@@ -47,7 +47,7 @@ foreach($sid in $allowedSids){
  if($actualSids -notcontains $sid){throw ('Pilot control ACL missing authorized identity SID: '+$sid)}
 }
 foreach($name in @('requests','responses')){New-Item -ItemType Directory -Path (Join-Path $dir $name) -ErrorAction Stop|Out-Null}
-$deadline=[DateTimeOffset]::UtcNow.AddMinutes(220).ToUnixTimeMilliseconds()
+$deadline=[DateTimeOffset]::UtcNow.AddMinutes(300).ToUnixTimeMilliseconds()
 [ordered]@{schema=1;runId=$env:GITHUB_RUN_ID;vmId=$VmId.ToString('D').ToLowerInvariant();generation=$ExpectedGeneration;originGeneration=$OriginGeneration;root=$owner.root;vmName=$owner.name;deadlineMs=$deadline}|
  ConvertTo-Json -Compress|Set-Content -LiteralPath (Join-Path $dir 'session.json') -Encoding utf8
 $desktop=Join-Path $env:PUBLIC 'Desktop'

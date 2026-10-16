@@ -1,7 +1,8 @@
 # Owner command from authenticated HOST RDP session; no cloud credentials.
 [CmdletBinding()]
 param([Parameter(Mandatory)][ValidateSet('Save','Finish')][string]$Operation,
-      [Parameter(Mandatory)][string]$ControlDir)
+      [Parameter(Mandatory)][string]$ControlDir,
+      [ValidateRange(1,3600)][int]$WaitSeconds=1800)
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
 $path=Join-Path $ControlDir 'session.json'
@@ -21,11 +22,16 @@ $dest=Join-Path $root ('request-'+$id+'.json')
 [IO.File]::Move($temp,$dest)
 Write-Host ('Submitted '+$Operation+' request '+$id+'; submission does NOT prove persistence.')
 $response=Join-Path (Join-Path $ControlDir 'responses') ('response-'+$id+'.json')
-while($true){
+$waitUntil=[DateTime]::UtcNow.AddSeconds($WaitSeconds)
+$verified=$false
+while([DateTime]::UtcNow -lt $waitUntil){
  if(Test-Path -LiteralPath $response){
   $r=Get-Content -LiteralPath $response -Raw|ConvertFrom-Json
-  if($r.status -ceq 'verified' -and $r.verified -eq $true){Write-Host ('VERIFIED ENCRYPTED GENERATION: '+$r.generation);break}
+  if($r.status -ceq 'verified' -and $r.verified -eq $true){Write-Host ('VERIFIED ENCRYPTED GENERATION: '+$r.generation);$verified=$true;break}
   if($r.status -ceq 'failed'){throw ('Operation failed: '+$r.reason)}
  }
- Start-Sleep -Seconds 5
+ $remaining=($waitUntil-[DateTime]::UtcNow).TotalMilliseconds
+ if($remaining -gt 0){Start-Sleep -Milliseconds ([int][Math]::Min(5000,[Math]::Max(1,$remaining)))}
 }
+
+if(-not $verified){Write-Warning ('Operation '+$id+' is still pending. The request remains active; check its receipt at '+$response+'. No verified backup is claimed by this window.')}
