@@ -111,19 +111,21 @@ function Publish-WindowsStateRoundtrip {
 }
 
 function Restore-WindowsStateRoundtrip {
-    param([Parameter(Mandatory)][string]$ExpectedGeneration,[switch]$HoldForOperator,[string]$ExpectedSourceSha='')
+    param([Parameter(Mandatory)][string]$ExpectedGeneration,[switch]$HoldForOperator,[string]$ExpectedSourceSha='',[switch]$VerifyLiveSave)
     if($ExpectedGeneration -cnotmatch '^devbox-checkpoint-v1-ci-([1-9][0-9]*)-([1-9][0-9]*)-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{32}$'){throw 'Only an exact isolated CI generation can be restored.'}
     $producerRun=$Matches[1];$producerAttempt=$Matches[2]
-    if($HoldForOperator -and $ExpectedSourceSha -cnotmatch '^[0-9a-f]{40}$'){throw 'Pilot hold requires pinned producer source SHA.'}
-    if(-not $HoldForOperator -and $ExpectedSourceSha){throw 'Source override forbidden outside isolated hold.'}
-    $sourceSha=if($HoldForOperator){$ExpectedSourceSha}else{$env:GITHUB_SHA}
+    if(($HoldForOperator -or $VerifyLiveSave) -and $ExpectedSourceSha -cnotmatch '^[0-9a-f]{40}$'){throw 'Pilot hold requires pinned producer source SHA.'}
+    if($HoldForOperator -and $VerifyLiveSave){throw 'Live Save verification cannot hold a consumer guest.'}
+    if(-not $HoldForOperator -and -not $VerifyLiveSave -and $ExpectedSourceSha){throw 'Source override forbidden outside isolated hold.'}
+    $sourceSha=if($HoldForOperator -or $VerifyLiveSave){$ExpectedSourceSha}else{$env:GITHUB_SHA}
     Assert-WindowsStateRoundtripContext
     if($producerRun -ceq $env:GITHUB_RUN_ID){throw 'Consumer must be an independent run.'}
     $raw=& gh api ('repos/'+$env:GITHUB_REPOSITORY+'/actions/runs/'+$producerRun)
     if($LASTEXITCODE -ne 0){throw 'Producer completion cannot be verified.'}
     $producer=($raw -join "`n")|ConvertFrom-Json
     $canceledInteractiveSave=$HoldForOperator -and $producer.status -ceq 'completed' -and $producer.conclusion -ceq 'cancelled'
-    if($producer.status -cne 'completed' -or ($producer.conclusion -cne 'success' -and -not $canceledInteractiveSave) -or
+    $activeSave=$VerifyLiveSave -and $producer.status -ceq 'in_progress' -and $null -eq $producer.conclusion
+    if(((-not $activeSave) -and ($producer.status -cne 'completed' -or ($producer.conclusion -cne 'success' -and -not $canceledInteractiveSave))) -or
        [string]$producer.run_attempt -cne $producerAttempt -or $producer.event -cne 'workflow_dispatch' -or
        $producer.path -cne '.github/workflows/windows-state-probe-validate.yml' -or $producer.head_sha -cne $sourceSha){
         throw 'Producer must be successful or an explicitly verified canceled interactive Save, with exact pinned revision.'
@@ -149,7 +151,11 @@ function Restore-WindowsStateRoundtrip {
     if($records.Count -ne 1){throw 'Whole guest transfer record missing/ambiguous.'}
     $systemProduct=Get-CimInstance Win32_ComputerSystemProduct -ErrorAction Stop
     $outerId=([guid]$systemProduct.UUID).ToString()
-    $raw=& python (Join-Path $PSScriptRoot 'windows_state_transfer.py') verify-record --generation $ExpectedGeneration --record $records[0].FullName --host $outerId --run $env:GITHUB_RUN_ID --producer-conclusion $producer.conclusion
+    $recordArgs=@()
+    $producerConclusion=[string]$producer.conclusion
+    if($VerifyLiveSave){$recordArgs=@('--allow-live-save')}
+    if($activeSave){$producerConclusion='in_progress'}
+    $raw=& python (Join-Path $PSScriptRoot 'windows_state_transfer.py') verify-record --generation $ExpectedGeneration --record $records[0].FullName --host $outerId --run $env:GITHUB_RUN_ID --producer-conclusion $producerConclusion @recordArgs
     if($LASTEXITCODE -ne 0){throw 'Fresh-host/source/fixture identity verification refused.'}
     $record=($raw -join "`n")|ConvertFrom-Json
     if($record.source_sha -cne $sourceSha){throw 'Encrypted producer revision mismatch.'}

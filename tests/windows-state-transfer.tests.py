@@ -78,6 +78,22 @@ class ExactGenerationReaderTests(unittest.TestCase):
   for conclusion in ('failure','timed_out','in_progress'):
    with self.subTest(conclusion=conclusion),self.assertRaises(module.CheckpointError):
     module.validate_transfer_record(record,TAG,host,'456',producer_conclusion=conclusion)
+ def test_live_save_requires_explicit_opt_in_and_authenticated_origin(self):
+  record=self.record();record['origin_generation']=TAG;record['generation']='save-'+'b'*32
+  host='44444444-4444-4444-8444-444444444444'
+  with self.assertRaises(module.CheckpointError):module.validate_transfer_record(record,TAG,host,'456',producer_conclusion='in_progress')
+  self.assertIs(module.validate_transfer_record(record,TAG,host,'456',producer_conclusion='in_progress',allow_live_save=True),record)
+  for field,value in [('generation','finish-'+'b'*32),('origin_generation',None)]:
+   invalid=copy.deepcopy(record)
+   if value is None:del invalid[field]
+   else:invalid[field]=value
+   with self.subTest(field=field),self.assertRaises(module.CheckpointError):module.validate_transfer_record(invalid,TAG,host,'456',producer_conclusion='in_progress',allow_live_save=True)
+  invalid=copy.deepcopy(record);invalid['generation']='finish-'+'b'*32
+  with self.assertRaises(module.CheckpointError):module.validate_transfer_record(invalid,TAG,host,'456',producer_conclusion='success',allow_live_save=True)
+  for conclusion in ('failure','timed_out'):
+   with self.assertRaises(module.CheckpointError):module.validate_transfer_record(record,TAG,host,'456',producer_conclusion=conclusion,allow_live_save=True)
+  with self.assertRaises(module.CheckpointError):module.validate_transfer_record(record,TAG,record['producer_host'],'456',producer_conclusion='in_progress',allow_live_save=True)
+  with self.assertRaises(module.CheckpointError):module.validate_transfer_record(record,TAG,host,'123',producer_conclusion='in_progress',allow_live_save=True)
  def test_exact_source_generation_only(self):
   r=self.reader();self.assertEqual(r.generations(),[TAG]);self.assertEqual(r.channel,'ci-123-1')
  def test_all_mutation_routes_refused_before_command(self):
