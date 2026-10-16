@@ -317,6 +317,26 @@ jobs:
           if($valid.Count -ne 1){throw 'Expected exactly one tailnet IPv4.'}
           Write-Output ('PILOT_TAILNET_PREFLIGHT_OK='+$valid[0])
 
+      - name: Read only the replacement host address and connection ports
+        shell: bash
+        run: |
+          python3 - <<'PYTHON'
+          import ipaddress,json,socket,subprocess
+          target='windows-home-pilot-38969952512'
+          state=json.loads(subprocess.check_output(['tailscale','status','--json']))
+          peers=[p for p in state.get('Peer',{}).values() if p.get('DNSName','').split('.')[0]==target or p.get('HostName')==target]
+          if len(peers)!=1:raise SystemExit('Expected exactly one replacement pilot peer; no other device probed.')
+          ips=[s for s in peers[0].get('TailscaleIPs',[]) if ':' not in s]
+          if len(ips)!=1 or ipaddress.ip_address(ips[0]) not in ipaddress.ip_network('100.64.0.0/10'):raise SystemExit('Replacement private address refused.')
+          ports={}
+          for port in (3389,5985):
+              try:
+                  with socket.create_connection((ips[0],port),timeout=5):ports[str(port)]=True
+              except OSError:ports[str(port)]=False
+          print('PILOT_REPLACEMENT_CONNECTION='+json.dumps({'runId':'38969952512','hostname':target,'ip':ips[0],'ports':ports}),flush=True)
+          if not ports['3389']:raise SystemExit('Replacement RDP endpoint not yet reachable.')
+          PYTHON
+
   restore-hold:
     if: github.event_name == 'workflow_dispatch' && inputs.transfer_phase == 'restore-hold'
     runs-on: windows-2025-vs2026
