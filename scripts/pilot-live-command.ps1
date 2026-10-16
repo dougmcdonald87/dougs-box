@@ -10,6 +10,16 @@ $new="if(Get-CimInstance -Namespace root/virtualization/v2 -ClassName Msvm_Compu
 if(-not $f.Contains($old)){throw 'Expected guard missing.'}
 Invoke-Expression $f.Replace($old,$new)
 $v=Get-VM -Id $id -ErrorAction Stop
-$r=Compare-VM -VM $v -ErrorAction Stop
+$root='E:/DevBox/Tools/WindowsStateProbe/probe-38647908553-1'
+if($v.Name -cne 'DevBoxWindowsState-38647908553-1' -or $v.Path.Replace('\','/') -ine ($root+'/'+$v.Name)){throw 'Planned identity refused.'}
+Remove-VM -VM $v -Force -ErrorAction Stop
+$files=@(Get-ChildItem (Join-Path $root 'checkpoints') -Filter manifest.json -Recurse -File)
+if($files.Count -ne 1){throw 'Manifest ambiguous.'}
+$m=Get-Content $files[0].FullName -Raw|ConvertFrom-Json
+if([guid]$m.vm_id -ne $id){throw 'Manifest identity refused.'}
+$p=Join-Path $files[0].DirectoryName 'payload'
+$dirs=@($m.disks|ForEach-Object {Split-Path (Join-Path $p $_.path) -Parent}|Sort-Object -Unique)
+if($dirs.Count -ne 1){throw 'Disk layout refused.'}
+$r=Compare-VM -Path (Join-Path $p $m.config) -Copy -VhdSourcePath $dirs[0] -VirtualMachinePath (Join-Path $root $m.vm_name) -VhdDestinationPath (Join-Path $root 'restored-disks') -SnapshotFilePath (Join-Path $root 'restored-snapshots') -ErrorAction Stop
 $r=Resolve-WindowsStateImportCompatibility -Report $r -ExpectedVmId $id -ExpectedName 'DevBoxWindowsState-38647908553-1' -ExpectedVersion '12.0'
 [ordered]@{runId='38971777364';correctionOnly=$true;remainingIssues=@($r.Incompatibilities).Count;vmId=[string]$r.VM.Id;vmName=$r.VM.Name;version=[string]$r.VM.Version}|ConvertTo-Json -Compress
