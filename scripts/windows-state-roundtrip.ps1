@@ -123,8 +123,9 @@ function Assert-WindowsStateLiveProducer {
 }
 
 function Restore-WindowsStateRoundtrip {
-    param([Parameter(Mandatory)][string]$ExpectedGeneration,[switch]$HoldForOperator,[string]$ExpectedSourceSha='',[switch]$VerifyLiveSave)
+    param([Parameter(Mandatory)][string]$ExpectedGeneration,[switch]$HoldForOperator,[string]$ExpectedSourceSha='',[switch]$VerifyLiveSave,[switch]$ProbeGuestNetwork)
     if($ExpectedGeneration -cnotmatch '^devbox-checkpoint-v1-ci-([1-9][0-9]*)-([1-9][0-9]*)-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{32}$'){throw 'Only an exact isolated CI generation can be restored.'}
+    if($ProbeGuestNetwork -and (-not $VerifyLiveSave -or $HoldForOperator)){throw 'Network probe only on a disposable live-Save verification consumer.'}
     $producerRun=$Matches[1];$producerAttempt=$Matches[2]
     if(($HoldForOperator -or $VerifyLiveSave) -and $ExpectedSourceSha -cnotmatch '^[0-9a-f]{40}$'){throw 'Pilot hold requires pinned producer source SHA.'}
     if($HoldForOperator -and $VerifyLiveSave){throw 'Live Save verification cannot hold a consumer guest.'}
@@ -184,7 +185,7 @@ function Restore-WindowsStateRoundtrip {
     $directory=Join-Path $root ('checkpoints/'+$record.generation)
     Move-Item -LiteralPath $originalDirectory -Destination $directory -ErrorAction Stop
     @{schema=1;root=$root;name=$name;vmId=$id.ToString();status='created'}|ConvertTo-Json|Set-Content -LiteralPath (Join-Path $root 'probe-owner.json') -Encoding utf8
-    $holdVerified=$false
+    $holdVerified=$false;$networkProof=$null
     try {
         $vm=Import-WindowsStateCheckpoint -Root $root -VmId $id -ExportPath (Join-Path $directory 'payload') -ManifestPath (Join-Path $directory 'manifest.json')
         Start-VM -VM $vm -ErrorAction Stop
@@ -198,9 +199,14 @@ function Restore-WindowsStateRoundtrip {
             if($actual.preferences.theme -cne $record.baseline.preferences.theme -or $actual.preferences.volume -ne $record.baseline.preferences.volume){throw 'Fresh-host application preferences mismatch.'}
         } finally {Remove-PSSession $session}
         if($activeSave){Assert-WindowsStateLiveProducer -ProducerRun $producerRun -ProducerAttempt $producerAttempt -SourceSha $sourceSha}
+        if($ProbeGuestNetwork){
+            . (Join-Path $PSScriptRoot 'windows-home-network-probe.ps1')
+            $networkProof=Test-WindowsHomeGuestNetwork -VmId $id -Credential $credential
+            if($networkProof.verified -ne $true){throw ('Disposable guest network probe refused at '+$networkProof.stage)}
+        }
         $holdVerified=$true
         $originGeneration=if($record.PSObject.Properties.Name -contains 'origin_generation'){[string]$record.origin_generation}else{$ExpectedGeneration}
-        [pscustomobject]@{root=$root;vmName=$name;originGeneration=$originGeneration;generation=$ExpectedGeneration;vmId=$id.ToString();producerHost=$record.producer_host;consumerHost=$outerId;sourceRun=$record.producer_run;consumerRun=$env:GITHUB_RUN_ID;boot=$true;program=$actual.programVersion;documentSha256=$actual.documentSha256;preferences=$actual.preferences;windowsHideFileExt=$actual.windowsHideFileExt;machineGuid=$actual.machineGuid;freshHostRestored=$true}
+        [pscustomobject]@{root=$root;vmName=$name;originGeneration=$originGeneration;generation=$ExpectedGeneration;vmId=$id.ToString();producerHost=$record.producer_host;consumerHost=$outerId;sourceRun=$record.producer_run;consumerRun=$env:GITHUB_RUN_ID;boot=$true;program=$actual.programVersion;documentSha256=$actual.documentSha256;preferences=$actual.preferences;windowsHideFileExt=$actual.windowsHideFileExt;machineGuid=$actual.machineGuid;freshHostRestored=$true;guestNetworkProbe=$networkProof}
     } finally {
         if(-not $HoldForOperator -or -not $holdVerified){
             if(Get-VM -Id $id -ErrorAction SilentlyContinue){Remove-WindowsStateProbe -Root $root -VmName $name}
