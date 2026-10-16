@@ -1,6 +1,6 @@
-# Single-use owner-requested connection of the Windows 10 Home VM host.
+# Single-use owner-approved independent restore verification; no user VM changes.
 # Restricted to the pilot branch; never launches original DevBox or production workflows.
-name: One-time Windows 10 Home connection kickoff
+name: One-time approved Windows Home restore verification
 on:
   push:
     branches: [pilot/windows-home-connection-20261015]
@@ -12,14 +12,14 @@ jobs:
     if: >-
       github.event_name == 'push' &&
       github.ref == 'refs/heads/pilot/windows-home-connection-20261015' &&
-      github.event.head_commit.message == 'chore(pilot): launch one Windows Home terminal pairing session'
+      github.event.head_commit.message == 'test(pilot): launch approved isolated live Save restore'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
       actions: write
       contents: read
     steps:
-      - name: Dispatch exactly one VM host and fresh Google pairing session
+      - name: Dispatch exactly one independent live Save restore verifier
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -30,6 +30,7 @@ jobs:
           gh workflow run 'windows-state-probe-validate.yml' \
             --repo "$GH_REPO" \
             --ref 'pilot/windows-home-connection-20261015' \
-            --field transfer_phase=restore-hold \
-            --field expected_generation=devbox-checkpoint-v1-ci-38647908553-1-20261014T225101Z-eb2366ef7dc34ea4aee45c30bbc721b6
-          echo 'PILOT_ONE_SHOT_CONNECTION_DISPATCH_ACCEPTED=true'
+            --field transfer_phase=restore-live-save-probe \
+            --field expected_generation=devbox-checkpoint-v1-ci-38930283997-1-20261016T200332Z-ae82c5cc06b2488787c87155d9134862 \
+            --field expected_source_sha=21b49e1e87e93fb71b4ef8f736e459b5e86e530f
+          echo 'PILOT_ONE_SHOT_RESTORE_DISPATCH_ACCEPTED=true'
