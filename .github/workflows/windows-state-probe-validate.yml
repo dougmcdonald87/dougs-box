@@ -495,14 +495,24 @@ jobs:
               except OSError:ports[port]=False
           print('PILOT_PORTS='+json.dumps(ports),flush=True)
           if not ports[5985]:raise SystemExit(0)
-          subprocess.run([sys.executable,'-m','pip','install','--disable-pip-version-check','--quiet','pywinrm==0.5.0'],check=True)
+          subprocess.run([sys.executable,'-m','pip','install','--disable-pip-version-check','--quiet','pywinrm==0.5.0','cryptography'],check=True)
           import winrm
           password=os.environ.get('PILOT_OWNER_PASSWORD')
           if not password:raise SystemExit('Existing owner credential unavailable.')
           try:
               session=winrm.Session('http://'+ip+':5985/wsman',auth=('runneradmin',password),transport='ntlm',message_encryption='always',operation_timeout_sec=15,read_timeout_sec=20)
-              result=session.run_ps("hostname; whoami; Test-Path -LiteralPath 'C:\\ProgramData\\WindowsHomePilot\\38930283997'; Get-VM -Id '66b514d0-7246-493f-ade3-1f004cd12411' | Select-Object -ExpandProperty Id")
-              print('PILOT_WINRM_EXIT='+str(result.status_code),flush=True)
-              if result.status_code==0:print(result.std_out.decode('utf-8',errors='replace'),flush=True)
+              script=open('scripts/pilot-live-command.ps1',encoding='utf-8').read()
+              result=session.run_ps(script)
+              import base64
+              from cryptography.hazmat.primitives.asymmetric import rsa,padding
+              from cryptography.hazmat.primitives import hashes
+              modulus='sAG02lyI4VmCrns0hn8SX/qBliFPYWpbcBW4lu6UBRqDxOlgPWwlSdnnCP1LZG9ShL9Cv10EgjdENZZb23JJ+lhu6R/K+FLS9raCpWLY5t/BGphCbbIszLAqMkROtsIyxP+HHE2fUxaZAseX6JjCMtRjw0/MStElH9oh+aCvIfQt7fUlDng+JU2DqjqswBUd/cT6EPMqQDDgIy8887ba4p/Eil+0vTzWRoUAs2JJcXV+P5w/DKiKoNS9uSMC6DeSVm0S6/5hfY1YijRuH1KR9ne3REB0EThwLvkb9le+IUoFdVokEsgOYw5bsO1CQIExHpQMPRj31k1uV1VHITAzHLdz/hAZmHVzqZ5c0eqLjFNENxvR8KdLhg4Cu5+hrBu8zH3QJ128EEfROlXOJoJ+RpcipHFfkr3fl3xErXHvTN2E/RLxpLgJ4WSZwkKO4m05CmLe8wKO3tDmlRskEL7nDQB/c+ahS+sqi50BVqjseJkIMgDX68y3Ka0XuE40+rYd'
+              public=rsa.RSAPublicNumbers(65537,int.from_bytes(base64.b64decode(modulus),'big')).public_key()
+              payload=json.dumps({'runId':'38930283997','status':result.status_code,'stdout':result.std_out.decode('utf-8',errors='replace'),'stderr':result.std_err.decode('utf-8',errors='replace')}).encode()
+              print('LIVE_RESULT_BEGIN',flush=True)
+              for index,offset in enumerate(range(0,len(payload),120)):
+                  cipher=public.encrypt(payload[offset:offset+120],padding.OAEP(mgf=padding.MGF1(hashes.SHA256()),algorithm=hashes.SHA256(),label=None))
+                  print('LIVE_RESULT_'+str(index)+'='+base64.b64encode(cipher).decode(),flush=True)
+              print('LIVE_RESULT_END',flush=True)
           except Exception as error:print('PILOT_WINRM_ERROR_CLASS='+type(error).__name__,flush=True)
           PYTHON
