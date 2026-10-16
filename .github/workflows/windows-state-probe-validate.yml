@@ -411,13 +411,20 @@ jobs:
           $controlDir=Join-Path $env:ProgramData ('WindowsHomePilot\'+$env:GITHUB_RUN_ID)
           Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value ('control_dir='+$controlDir)
           Write-Output ('ISOLATED_VERIFIED_WINDOWS_HOME_VM='+$vm.vmId)
-      - name: Hold guest and publish owner Save Finish with trusted first-party worker
+      - name: Prepare artifact SDK for same-runner restricted terminal pairing
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          npm install --prefix .github/actions/pilot-device --no-save --ignore-scripts --no-audit --no-fund @actions/artifact@6.3.1
+          if($LASTEXITCODE -ne 0){throw 'Official pilot artifact SDK unavailable.'}
+      - name: Hold guest and pair restricted terminal with first-party Save Finish
         shell: pwsh
         env:
           WINDOWS_HOME_CONTROL_DIR: ${{ steps.restore_guest.outputs.control_dir }}
           GH_TOKEN: ${{ github.token }}
           RESTIC_PASSWORD: ${{ secrets.RESTIC_PASSWORD }}
+          PILOT_RSA_MODULUS: 'kSFkr1dssDXH+LnyZYicgk5uxQP/SIk4JRwi4Zf5Lmql491A4exmAfuF4EF6td3uB19QGoGY/xmBrSOMnnupU9xinzPJf1nzMQu3BVtVZB8mADriTiEG7APoB2wstiDLyTn6odL3OOv0ofn2KS95b+IPbJI1LOK8/if6wBZMejk3kn4yFzbI9YdZ5nqdyVU8SOEmsfglkvzits2kF1fYEJSSDuiXTDD/9RRVj1YPzbzDTUDw/lIT5QKUgAba8K5e4+SyvPwlgPxjm7Y5QHPZfOOip2wD0OM87dscRmujH6iVRaBD8rCShqXVN3viOY1d8lp5n60Gk/U9VufJvH7RtZoMhW4/AFlghI5WC+3CRb9OUVRbx82+o6QblkN0RO0/QBF9efAIwLiZXySlFhIWwC1OFqX49p/zMyv5Kf2kZNR/Uu8nbLV3vfeeDhFI5IIUlGhfiHz8keWlkEUfXRN7UITPwV0IV/sZtNMSv3+QMxam3+G4f+ps52s2ke3Jv+GP'
         run: |
           $ErrorActionPreference='Stop'
-          node .github/actions/pilot-device/hold-operator.mjs
-          if($LASTEXITCODE -ne 0){throw 'First-party owner operator hold failed.'}
+          node .github/actions/pilot-device/supervise-restricted.mjs
+          if($LASTEXITCODE -ne 0){throw 'Restricted terminal / first-party Save Finish supervision failed.'}
