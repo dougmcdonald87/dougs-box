@@ -12,7 +12,7 @@ jobs:
     if: >-
       github.event_name == 'push' &&
       github.ref == 'refs/heads/pilot/windows-home-connection-20261015' &&
-      github.event.head_commit.message == 'test(pilot): read replacement RDP connection only'
+      github.event.head_commit.message == 'test(pilot): verify replacement desktop through scoped read-only host command'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -30,5 +30,6 @@ jobs:
           gh workflow run 'windows-state-probe-validate.yml' \
             --repo "$GH_REPO" \
             --ref 'pilot/windows-home-connection-20261015' \
-            --field transfer_phase=tailnet-preflight
+            --field transfer_phase=live-host-probe
           echo 'PILOT_ONE_SHOT_RDP_PROBE_DISPATCH_ACCEPTED=true'
+
