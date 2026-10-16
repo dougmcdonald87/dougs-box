@@ -72,13 +72,14 @@ export async function supervise(){
   const {id}=await new DefaultArtifactClient().uploadArtifact('windows-home-pilot-pairing-'+runId,[encrypted],root,{retentionDays:1});
   console.log('PILOT_RESTRICTED_DEVICE_READY=true');
   console.log('PILOT_ENCRYPTED_ARTIFACT_ID='+id);
+  const abort=new AbortController();
   const lostAgent=new Promise((_,reject)=>{
-   child.once('exit',()=>reject(Error('Restricted terminal exited during operator hold')));
-   child.once('error',()=>reject(Error('Restricted terminal failed during operator hold')));
+   child.once('exit',()=>{abort.abort();reject(Error('Restricted terminal exited during operator hold'));});
+   child.once('error',()=>{abort.abort();reject(Error('Restricted terminal failed during operator hold'));});
   });
   const {holdOperatorSession}=await import('./hold-operator.mjs');
   const outcome=await Promise.race([
-   holdOperatorSession({controlDir,workspace,runId}),lostAgent
+   holdOperatorSession({controlDir,workspace,runId,signal:abort.signal}),lostAgent
   ]);
   console.log(outcome.completedFinish?'PILOT_VERIFIED_FINISH_HOLD_COMPLETE':'PILOT_HOLD_EXPIRED_WITHOUT_VERIFIED_FINISH');
   console.log('PILOT_OWNER_REQUESTS_PROCESSED='+outcome.processed);
