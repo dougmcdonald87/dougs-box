@@ -118,6 +118,30 @@ function Export-WindowsStateCheckpoint {
     }
 }
 
+function Resolve-WindowsStateImportCompatibility {
+    param([Parameter(Mandatory)]$Report,[Parameter(Mandatory)][guid]$ExpectedVmId,[Parameter(Mandatory)][string]$ExpectedName,[Parameter(Mandatory)][string]$ExpectedVersion)
+    if(-not $Report.VM -or $Report.VM.Id -ne $ExpectedVmId -or $Report.VM.Name -cne $ExpectedName -or [string]$Report.VM.Version -cne $ExpectedVersion){throw 'Import report identity/version mismatch; no network correction allowed.'}
+    $issues=@($Report.Incompatibilities|Where-Object {$_})
+    if(-not $issues.Count){return $Report}
+    foreach($issue in $issues){
+        if($issue.MessageId -ne 33012 -or -not $issue.Source -or
+           $issue.Source.PSObject.TypeNames -notcontains 'Microsoft.HyperV.PowerShell.VMNetworkAdapter' -or
+           $issue.Source.VMId -ne $ExpectedVmId -or $issue.Source.SwitchName -cne 'nat'){
+            throw 'Unexpected import incompatibility; no network correction allowed.'
+        }
+    }
+    $targets=@(Get-VMSwitch -Name 'nat' -ErrorAction Stop)
+    if($targets.Count -ne 1 -or $targets[0].SwitchType.ToString() -cne 'Internal'){throw 'Expected existing internal nat switch unavailable.'}
+    foreach($issue in $issues){Connect-VMNetworkAdapter -VMNetworkAdapter $issue.Source -SwitchName $targets[0].Name -ErrorAction Stop}
+    $resolved=Compare-VM -CompatibilityReport $Report -ErrorAction Stop
+    if(@($resolved.Incompatibilities|Where-Object {$_}).Count -or -not $resolved.VM -or
+       $resolved.VM.Id -ne $ExpectedVmId -or $resolved.VM.Name -cne $ExpectedName -or [string]$resolved.VM.Version -cne $ExpectedVersion){
+        throw 'Import remains incompatible after exact planned-adapter remapping.'
+    }
+    Write-Host 'WINDOWS_STATE_PLANNED_NAT_ADAPTER_REMAP_VERIFIED=true'
+    $resolved
+}
+
 function Import-WindowsStateCheckpoint {
     param([Parameter(Mandatory)][string]$Root,[Parameter(Mandatory)][guid]$VmId,[Parameter(Mandatory)][string]$ExportPath,[Parameter(Mandatory)][string]$ManifestPath,[ValidateSet('restored','restored-save','restored-finish')][string]$DestinationLabel='restored')
     $owner=Get-WindowsStateCheckpointOwner -Root $Root -VmId $VmId -AllowMissingVm
@@ -146,6 +170,9 @@ function Import-WindowsStateCheckpoint {
         $sourceDirectories=@($record.disks | ForEach-Object {Split-Path (Join-Path $payload $_.path) -Parent} | Sort-Object -Unique)
         if($sourceDirectories.Count -ne 1){throw 'Export disk layout requires explicit supported source directory.'}
         $report=Compare-VM -Path $config -Copy -VhdSourcePath $sourceDirectories[0] -VirtualMachinePath $vmPath -VhdDestinationPath $diskPath -SnapshotFilePath $snapshotPath -ErrorAction Stop
+        $initial=[ordered]@{expectedId=$VmId.ToString();actualId=[string]$report.VM.Id;expectedName=$owner.name;actualName=$report.VM.Name;expectedVersion=$record.configuration_version;actualVersion=[string]$report.VM.Version;issues=@($report.Incompatibilities|Where-Object {$_}|ForEach-Object {[ordered]@{messageId=$_.MessageId;message=$_.Message;sourceType=$_.Source.GetType().FullName}})}
+        Write-Host ('WINDOWS_STATE_IMPORT_INITIAL_COMPARISON='+($initial|ConvertTo-Json -Depth 6 -Compress))
+        $report=Resolve-WindowsStateImportCompatibility -Report $report -ExpectedVmId $VmId -ExpectedName $owner.name -ExpectedVersion $record.configuration_version
         $issues=@($report.Incompatibilities | Where-Object {$_})
         if($issues.Count -or $report.VM.Id -ne $VmId -or $report.VM.Name -cne $owner.name -or $report.VM.Version.ToString() -cne $record.configuration_version){
             $detail=[ordered]@{expectedId=$VmId.ToString();actualId=[string]$report.VM.Id;expectedName=$owner.name;actualName=$report.VM.Name;expectedVersion=$record.configuration_version;actualVersion=[string]$report.VM.Version;issues=@($issues|ForEach-Object {[ordered]@{messageId=$_.MessageId;message=$_.Message;sourceType=$_.Source.GetType().FullName}})}

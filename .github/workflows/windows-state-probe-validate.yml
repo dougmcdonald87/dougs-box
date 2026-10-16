@@ -381,6 +381,8 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference='Stop'
+          ./tests/windows-state-source-parse.tests.ps1
+          ./tests/windows-state-import-network.tests.ps1
           python ./tests/windows-home-rdp-receipt.tests.py
           if($LASTEXITCODE -ne 0){throw 'Pilot RDP receipt cross-step path tests failed; guest restore forbidden.'}
           python ./tests/windows-home-sid-acl.tests.py
