@@ -85,8 +85,69 @@ def _structure(value,expected_vm_id,supported_versions):
     if total>80*1024**3:raise ManifestError('Manifest inventory too large')
     config=_relative(value['config'])
     configs=[f for f in files.values() if f['path'].lower().endswith('.vmcx')]
-    if len(configs)!=1 or config.casefold() not in files or configs[0]['path'].casefold()!=config.casefold():
-        raise ManifestError('Exactly one exported VM configuration required')
+    main=[f for f in configs if f['path'].casefold().endswith('/virtual machines/'+_guid(expected_vm_id)+'.vmcx')]
+    if len(main)!=1 or config.casefold() not in files or main[0]['path'].casefold()!=config.casefold():
+        raise ManifestError('Exactly one owned VM configuration required')
+    for f in configs:
+        if f is not main[0] and not re.search(r'/snapshots/[0-9a-f-]{36}\.vmcx
+    # Checkpoint filenames contain checkpoint IDs. Native Compare-VM binds the embedded VM ID.
+    disks=value['disks']
+    if not isinstance(disks,list) or not disks:raise ManifestError('Export disks missing')
+    graph={}
+    for disk in disks:
+        if not isinstance(disk,dict) or set(disk)!={'path','parent','capacity_bytes','type'}:raise ManifestError('Invalid disk entry')
+        path=_relative(disk['path']);key=path.casefold()
+        if key in graph or key not in files or not path.lower().endswith(('.vhdx','.avhdx')):raise ManifestError('Disk file missing/duplicated')
+        if type(disk['capacity_bytes']) is not int or disk['capacity_bytes']!=64*1024**3:raise ManifestError('Owned disk capacity mismatch')
+        parent=disk['parent']
+        if disk['type']=='Dynamic' and parent is None:graph[key]=None
+        elif disk['type']=='Differencing' and parent is not None:graph[key]=_relative(parent).casefold()
+        else:raise ManifestError('Disk type/parent mismatch')
+    listed={f['path'].casefold() for f in files.values() if f['path'].lower().endswith(('.vhdx','.avhdx'))}
+    if set(graph)!=listed:raise ManifestError('Disk/parent inventory incomplete')
+    for key in graph:
+        seen=set();current=key
+        while current is not None:
+            if current not in graph:raise ManifestError('Differencing parent missing')
+            if current in seen:raise ManifestError('Differencing parent cycle')
+            seen.add(current);current=graph[current]
+    return files
+
+def make_manifest(root,vm_id,vm_name,version,mode,consistency,disks):
+    files=_inventory(root);configs=[f['path'] for f in files if f['path'].lower().endswith('.vmcx')]
+    main=[p for p in configs if p.casefold().endswith('/virtual machines/'+_guid(vm_id)+'.vmcx')]
+    if len(main)!=1:raise ManifestError('Export VM configuration ambiguous/missing')
+    value={'schema':1,'vm_id':_guid(vm_id),'vm_name':vm_name,'configuration_version':version,'mode':mode,'consistency':consistency,'generation':mode+'-'+uuid.uuid4().hex,'files':files,'disks':disks,'config':main[0]}
+    _structure(value,vm_id,[version])
+    return value
+
+def validate_manifest(root,value,expected_vm_id,supported_versions):
+    _structure(value,expected_vm_id,supported_versions)
+    actual=_inventory(root)
+    if actual!=sorted(value['files'],key=lambda x:x['path']):raise ManifestError('Export file inventory/length/hash mismatch')
+    return value
+
+if __name__=='__main__':
+    parser=argparse.ArgumentParser();parser.add_argument('action',choices=['create','verify']);parser.add_argument('--root',required=True);parser.add_argument('--metadata',required=True);parser.add_argument('--manifest',required=True)
+    args=parser.parse_args();metadata=json.loads(Path(args.metadata).read_text(encoding='utf-8-sig'))
+    if args.action=='create':
+        destination=Path(args.manifest)
+        if destination.exists():raise ManifestError('Existing immutable manifest must not be replaced')
+        consistency=consistency_policy(metadata['mode'],metadata['state'],metadata.get('production_only',False),metadata.get('checkpoint_id'),metadata.get('shutdown_verified',False),metadata.get('capture_state'))
+        value=make_manifest(args.root,metadata['vm_id'],metadata['vm_name'],metadata['configuration_version'],metadata['mode'],consistency,metadata['disks'])
+        if 'generation' in metadata:
+            value['generation']=metadata['generation']
+            _structure(value,metadata['vm_id'],[metadata['configuration_version']])
+        payload=json.dumps(value,indent=2).encode()
+        if len(payload)>1024**2:raise ManifestError('Manifest exceeds metadata limit')
+        with destination.open('xb') as stream:stream.write(payload)
+    else:
+        raw=Path(args.manifest).read_bytes()
+        if len(raw)>1024**2:raise ManifestError('Manifest exceeds metadata limit')
+        value=validate_manifest(args.root,json.loads(raw),metadata['vm_id'],metadata['supported_versions'])
+    print(json.dumps({'vm_id':value['vm_id'],'generation':value['generation'],'files':len(value['files']),'verified':True}))
+,f['path'],re.I):
+            raise ManifestError('Unexpected additional VM configuration')
     # Checkpoint filenames contain checkpoint IDs. Native Compare-VM binds the embedded VM ID.
     disks=value['disks']
     if not isinstance(disks,list) or not disks:raise ManifestError('Export disks missing')
