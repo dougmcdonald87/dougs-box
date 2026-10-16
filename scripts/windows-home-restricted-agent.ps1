@@ -3,6 +3,7 @@
 [CmdletBinding()]
 param(
     [switch]$ChildProbe,
+    [switch]$LaunchAgent,
     [string]$ControlDir,
     [string]$GuestRoot
 )
@@ -128,6 +129,44 @@ try {
         throw 'Restricted user can reach privileged data or identity is unverified.'
     }
     Write-Output 'PILOT_RESTRICTED_IDENTITY_SENTINEL_DENIAL_OK=true'
+    if ($LaunchAgent) {
+        # The third-party process runs under the SAME restricted token as the probe.
+        $psi.FileName = Join-Path $env:WINDIR 'System32\cmd.exe'
+        $psi.ArgumentList.Clear()
+        foreach ($arg in @('/d','/s','/c',
+            'npx --yes @wonderwhy-er/desktop-commander@0.2.52 remote --no-persist-session')) {
+            [void]$psi.ArgumentList.Add($arg)
+        }
+        $profileDir = Join-Path $env:SystemDrive ('Users\'+$name)
+        $psi.Environment['USERPROFILE'] = $profileDir
+        $psi.Environment['HOME'] = $profileDir
+        $psi.Environment['APPDATA'] = Join-Path $profileDir 'AppData\Roaming'
+        $psi.Environment['LOCALAPPDATA'] = Join-Path $profileDir 'AppData\Local'
+        $psi.Environment['TEMP'] = Join-Path $profileDir 'AppData\Local\Temp'
+        $psi.Environment['TMP'] = $psi.Environment['TEMP']
+        $agent = [Diagnostics.Process]::Start($psi)
+        try {
+            $stdout = $agent.StandardOutput.ReadLineAsync()
+            $stderrStream = $agent.StandardError.ReadLineAsync()
+            while (-not $agent.HasExited) {
+                if ($stdout.IsCompleted) {
+                    $line = $stdout.GetAwaiter().GetResult()
+                    if ($null -ne $line) { [Console]::Out.WriteLine($line) }
+                    $stdout = $agent.StandardOutput.ReadLineAsync()
+                }
+                if ($stderrStream.IsCompleted) {
+                    $line = $stderrStream.GetAwaiter().GetResult()
+                    if ($null -ne $line) { [Console]::Out.WriteLine($line) }
+                    $stderrStream = $agent.StandardError.ReadLineAsync()
+                }
+                Start-Sleep -Milliseconds 100
+            }
+            throw 'Restricted Desktop Commander terminated before verified Finish.'
+        } finally {
+            if (-not $agent.HasExited) { $agent.Kill($true) }
+            $agent.Dispose()
+        }
+    }
 } finally {
     if ($accountCreated) { Remove-LocalUser -Name $name -ErrorAction Stop }
     $password.Dispose()
