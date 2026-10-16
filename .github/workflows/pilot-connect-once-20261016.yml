@@ -12,7 +12,7 @@ jobs:
     if: >-
       github.event_name == 'push' &&
       github.ref == 'refs/heads/pilot/windows-home-connection-20261015' &&
-      github.event.head_commit.message == 'test(pilot): verify replacement desktop through scoped read-only host command'
+      github.event.head_commit.message == 'test(pilot): inspect fresh recovery run 38971777364'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

@@ -514,7 +514,7 @@ jobs:
           python3 -m venv "$RUNNER_TEMP/pilot-winrm"
           "$RUNNER_TEMP/pilot-winrm/bin/python" - <<'PYTHON'
           import ipaddress,json,socket,subprocess,sys,os
-          target='windows-home-pilot-38969952512'
+          target='windows-home-pilot-38971777364'
           state=json.loads(subprocess.check_output(['tailscale','status','--json']))
           peers=[p for p in state.get('Peer',{}).values() if p.get('DNSName','').split('.')[0]==target or p.get('HostName')==target]
           if len(peers)!=1:raise SystemExit('Expected exactly one current pilot peer; no other host probed.')
@@ -541,7 +541,7 @@ jobs:
               from cryptography.hazmat.primitives import hashes
               modulus='sAG02lyI4VmCrns0hn8SX/qBliFPYWpbcBW4lu6UBRqDxOlgPWwlSdnnCP1LZG9ShL9Cv10EgjdENZZb23JJ+lhu6R/K+FLS9raCpWLY5t/BGphCbbIszLAqMkROtsIyxP+HHE2fUxaZAseX6JjCMtRjw0/MStElH9oh+aCvIfQt7fUlDng+JU2DqjqswBUd/cT6EPMqQDDgIy8887ba4p/Eil+0vTzWRoUAs2JJcXV+P5w/DKiKoNS9uSMC6DeSVm0S6/5hfY1YijRuH1KR9ne3REB0EThwLvkb9le+IUoFdVokEsgOYw5bsO1CQIExHpQMPRj31k1uV1VHITAzHLdz/hAZmHVzqZ5c0eqLjFNENxvR8KdLhg4Cu5+hrBu8zH3QJ128EEfROlXOJoJ+RpcipHFfkr3fl3xErXHvTN2E/RLxpLgJ4WSZwkKO4m05CmLe8wKO3tDmlRskEL7nDQB/c+ahS+sqi50BVqjseJkIMgDX68y3Ka0XuE40+rYd'
               public=rsa.RSAPublicNumbers(65537,int.from_bytes(base64.b64decode(modulus),'big')).public_key()
-              payload=json.dumps({'runId':'38969952512','status':result.status_code,'stdout':result.std_out.decode('utf-8',errors='replace'),'stderr':result.std_err.decode('utf-8',errors='replace')}).encode()
+              payload=json.dumps({'runId':'38971777364','status':result.status_code,'stdout':result.std_out.decode('utf-8',errors='replace'),'stderr':result.std_err.decode('utf-8',errors='replace')}).encode()
               print('LIVE_RESULT_BEGIN',flush=True)
               for index,offset in enumerate(range(0,len(payload),120)):
                   cipher=public.encrypt(payload[offset:offset+120],padding.OAEP(mgf=padding.MGF1(hashes.SHA256()),algorithm=hashes.SHA256(),label=None))
