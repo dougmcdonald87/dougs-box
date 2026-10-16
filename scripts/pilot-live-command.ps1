@@ -1,15 +1,15 @@
 $ErrorActionPreference='Stop'
 $id=[guid]'66b514d0-7246-493f-ade3-1f004cd12411'
-function Inventory($class){@(Get-CimInstance -Namespace root/virtualization/v2 -ClassName $class|Where-Object {$_.Name -eq $id.ToString()}|Select-Object Name,ElementName,Caption)}
-$before=@(Get-VM -Id $id -ErrorAction SilentlyContinue)
-if($before.Count){throw 'Comparison refuses occupied identity.'}
-$root='E:/DevBox/Tools/WindowsStateProbe/probe-38647908553-1'
-$files=@(Get-ChildItem -LiteralPath (Join-Path $root 'checkpoints') -Filter manifest.json -Recurse -File)
-if($files.Count -ne 1){throw 'Manifest ambiguous.'}
-$m=Get-Content $files[0].FullName -Raw|ConvertFrom-Json
-if([guid]$m.vm_id -ne $id){throw 'Manifest identity mismatch.'}
-$p=Join-Path $files[0].DirectoryName 'payload'
-$dirs=@($m.disks|ForEach-Object {Split-Path (Join-Path $p $_.path) -Parent}|Sort-Object -Unique)
-if($dirs.Count -ne 1){throw 'Disk layout refused.'}
-$r=Compare-VM -Path (Join-Path $p $m.config) -Copy -VhdSourcePath $dirs[0] -VirtualMachinePath (Join-Path $root $m.vm_name) -VhdDestinationPath (Join-Path $root 'restored-disks') -SnapshotFilePath (Join-Path $root 'restored-snapshots') -ErrorAction Stop
-[ordered]@{runId='38971777364';comparisonOnly=$true;reportVm=($r.VM|Select-Object Id,Name,State,Path,IsPlanned,Version);afterVm=@(Get-VM -Id $id -ErrorAction SilentlyContinue|Select-Object Id,Name,State,Path,IsPlanned,Version);native=(Inventory 'Msvm_ComputerSystem');planned=(Inventory 'Msvm_PlannedComputerSystem');issues=@($r.Incompatibilities|Select-Object MessageId,Message)}|ConvertTo-Json -Depth 7 -Compress
+if(Get-CimInstance -Namespace root/virtualization/v2 -ClassName Msvm_ComputerSystem -Filter ("Name='"+$id+"'") -ErrorAction Stop){throw 'Registered guest refused.'}
+$path='D:/a/dougs-box/dougs-box/scripts/windows-state-checkpoint.ps1'
+$t=$null;$e=$null;$a=[System.Management.Automation.Language.Parser]::ParseFile($path,[ref]$t,[ref]$e)
+if($e.Count){throw 'Parser refused.'}
+$f=$a.Find({param($n)$n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Resolve-WindowsStateImportCompatibility'},$true).Extent.Text
+$old="if(Get-VM -Id `$ExpectedVmId -ErrorAction SilentlyContinue)"
+$new="if(Get-CimInstance -Namespace root/virtualization/v2 -ClassName Msvm_ComputerSystem -Filter (`"Name='`"+`$ExpectedVmId.ToString()+`"'`") -ErrorAction Stop)"
+if(-not $f.Contains($old)){throw 'Expected guard missing.'}
+Invoke-Expression $f.Replace($old,$new)
+$v=Get-VM -Id $id -ErrorAction Stop
+$r=Compare-VM -VM $v -ErrorAction Stop
+$r=Resolve-WindowsStateImportCompatibility -Report $r -ExpectedVmId $id -ExpectedName 'DevBoxWindowsState-38647908553-1' -ExpectedVersion '12.0'
+[ordered]@{runId='38971777364';correctionOnly=$true;remainingIssues=@($r.Incompatibilities).Count;vmId=[string]$r.VM.Id;vmName=$r.VM.Name;version=[string]$r.VM.Version}|ConvertTo-Json -Compress

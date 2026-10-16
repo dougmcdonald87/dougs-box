@@ -123,7 +123,7 @@ function Resolve-WindowsStateImportCompatibility {
     if(-not $Report.VM -or $Report.VM.Id -ne $ExpectedVmId -or $Report.VM.Name -cne $ExpectedName -or [string]$Report.VM.Version -cne $ExpectedVersion){throw 'Import report identity/version mismatch; no network correction allowed.'}
     $issues=@($Report.Incompatibilities|Where-Object {$_})
     if(-not $issues.Count){return $Report}
-    if(Get-VM -Id $ExpectedVmId -ErrorAction SilentlyContinue){throw 'Compatibility correction refuses a registered VM.'}
+    if(Get-CimInstance -Namespace root/virtualization/v2 -ClassName Msvm_ComputerSystem -Filter ("Name='"+$ExpectedVmId.ToString()+"'") -ErrorAction Stop){throw 'Compatibility correction refuses a registered VM.'}
     foreach($issue in $issues){
         if(-not $issue.Source -or $issue.Source.VMId -ne $ExpectedVmId){throw 'Foreign compatibility source refused.'}
         switch([int]$issue.MessageId){

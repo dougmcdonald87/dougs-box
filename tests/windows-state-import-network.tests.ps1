@@ -20,10 +20,11 @@ function New-SnapshotIssue {
 }
 function Get-VM {param($Id,$ErrorAction) $script:existingVm}
 function Remove-VMSavedState {param($VMSnapshot,$Confirm,$ErrorAction) $script:stateRemovals++;if($VMSnapshot.VMId -ne $id -or $VMSnapshot.Id -eq $id){throw 'Wrong checkpoint'};if($script:clearFails){throw 'Injected clear failure'}}
+function Get-CimInstance {param($Namespace,$ClassName,$Filter,$ErrorAction) if($script:existingVm -and -not $script:plannedOnly){$script:existingVm}}
 function Get-VMSwitch {param($Name,$ErrorAction) if($script:missingSwitch){throw 'Missing target'};[pscustomobject]@{Name='nat';SwitchType=$script:switchType}}
 function Connect-VMNetworkAdapter {param($VMNetworkAdapter,$SwitchName,$ErrorAction) $script:connections++;if($SwitchName -cne 'nat'){throw 'Wrong target'}}
 function Compare-VM {param($CompatibilityReport,$ErrorAction) $script:comparisons++;if(-not $script:stillBad){$CompatibilityReport.Incompatibilities=@()};$CompatibilityReport}
-function Reset-Case {$script:caseCount++;$script:connections=0;$script:comparisons=0;$script:stateRemovals=0;$script:existingVm=$null;$script:clearFails=$false;$script:switchType='Internal';$script:missingSwitch=$false;$script:stillBad=$false}
+function Reset-Case {$script:caseCount++;$script:connections=0;$script:comparisons=0;$script:stateRemovals=0;$script:existingVm=$null;$script:plannedOnly=$false;$script:clearFails=$false;$script:switchType='Internal';$script:missingSwitch=$false;$script:stillBad=$false}
 function Resolve-Test($Report){Resolve-WindowsStateImportCompatibility -Report $Report -ExpectedVmId $id -ExpectedName $name -ExpectedVersion '12.0'}
 function Assert-Refused($Report,$ExpectedConnections=0,$ExpectedRemovals=0){
     $refused=$false;try{Resolve-Test $Report|Out-Null}catch{$refused=$true}
@@ -55,4 +56,6 @@ Reset-Case;$r=New-Report;$r.Incompatibilities+=New-SnapshotIssue;$r.Incompatibil
 Reset-Case;$r=New-Report;$script:existingVm=[pscustomobject]@{Id=$id};Assert-Refused $r
 Reset-Case;$r=New-Report;$r.Incompatibilities=@(New-SnapshotIssue);$script:clearFails=$true;Assert-Refused $r 0 1
 Reset-Case;$r=New-Report;$r.Incompatibilities+=New-SnapshotIssue;$script:stillBad=$true;Assert-Refused $r 1 1
+Reset-Case;$r=New-Report;$script:existingVm=[pscustomobject]@{Id=$id};$script:plannedOnly=$true;$actual=Resolve-Test $r
+if($script:connections -ne 1 -or $script:comparisons -ne 1){throw 'ASSERT: planned copy mistaken for registered guest'}
 Write-Output ('IMPORT NETWORK + HISTORICAL CPU STATE AND FOREIGN IDENTITY REFUSALS: PASS ('+$script:caseCount+' cases)')
