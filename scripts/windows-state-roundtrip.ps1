@@ -110,6 +110,18 @@ function Publish-WindowsStateRoundtrip {
     [pscustomobject]@{generation=$accepted.generation;vmId=$VmId.ToString();producerHost=$outerId;archiveBytes=$archiveBytes;snapshotId=$snapshot;published=$true;freshHostRestored=$false}
 }
 
+function Assert-WindowsStateLiveProducer {
+    param([string]$ProducerRun,[string]$ProducerAttempt,[string]$SourceSha)
+    $raw=& gh api ('repos/'+$env:GITHUB_REPOSITORY+'/actions/runs/'+$ProducerRun)
+    if($LASTEXITCODE -ne 0){throw 'Live producer status recheck unavailable.'}
+    $current=($raw -join "`n")|ConvertFrom-Json
+    if($current.status -cne 'in_progress' -or $null -ne $current.conclusion -or
+       [string]$current.run_attempt -cne $ProducerAttempt -or $current.head_sha -cne $SourceSha -or
+       $current.event -cne 'workflow_dispatch' -or $current.path -cne '.github/workflows/windows-state-probe-validate.yml'){
+        throw 'Live producer changed or ended during recovery; no live verification success claimed.'
+    }
+}
+
 function Restore-WindowsStateRoundtrip {
     param([Parameter(Mandatory)][string]$ExpectedGeneration,[switch]$HoldForOperator,[string]$ExpectedSourceSha='',[switch]$VerifyLiveSave)
     if($ExpectedGeneration -cnotmatch '^devbox-checkpoint-v1-ci-([1-9][0-9]*)-([1-9][0-9]*)-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{32}$'){throw 'Only an exact isolated CI generation can be restored.'}
@@ -163,6 +175,7 @@ function Restore-WindowsStateRoundtrip {
     if((Split-Path $originalDirectory -Leaf) -cne $record.generation){throw 'Recovered checkpoint generation path mismatch.'}
     $manifest=Join-Path $originalDirectory 'manifest.json'
     if((Get-FileHash -LiteralPath $manifest -Algorithm SHA256).Hash.ToLowerInvariant() -cne $record.manifest_sha256){throw 'Recovered checkpoint manifest canary mismatch.'}
+    if($activeSave){Assert-WindowsStateLiveProducer -ProducerRun $producerRun -ProducerAttempt $producerAttempt -SourceSha $sourceSha}
     $root=$record.root;$name=$record.vm_name;$id=[guid]$record.vm_id
     $policy=Test-WindowsStateProbeHost -Root $root -VmName $name
     if(-not $policy.eligible){throw $policy.reason}
@@ -184,6 +197,7 @@ function Restore-WindowsStateRoundtrip {
             foreach($property in @('machineName','machineGuid','programPath','programVersion','documentSha256','windowsHideFileExt')){if($actual.$property -cne $record.baseline.$property){throw ('Fresh-host fixture mismatch: '+$property)}}
             if($actual.preferences.theme -cne $record.baseline.preferences.theme -or $actual.preferences.volume -ne $record.baseline.preferences.volume){throw 'Fresh-host application preferences mismatch.'}
         } finally {Remove-PSSession $session}
+        if($activeSave){Assert-WindowsStateLiveProducer -ProducerRun $producerRun -ProducerAttempt $producerAttempt -SourceSha $sourceSha}
         $holdVerified=$true
         $originGeneration=if($record.PSObject.Properties.Name -contains 'origin_generation'){[string]$record.origin_generation}else{$ExpectedGeneration}
         [pscustomobject]@{root=$root;vmName=$name;originGeneration=$originGeneration;generation=$ExpectedGeneration;vmId=$id.ToString();producerHost=$record.producer_host;consumerHost=$outerId;sourceRun=$record.producer_run;consumerRun=$env:GITHUB_RUN_ID;boot=$true;program=$actual.programVersion;documentSha256=$actual.documentSha256;preferences=$actual.preferences;windowsHideFileExt=$actual.windowsHideFileExt;machineGuid=$actual.machineGuid;freshHostRestored=$true}

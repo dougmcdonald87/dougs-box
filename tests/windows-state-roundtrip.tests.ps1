@@ -31,5 +31,20 @@ try {
     Assert-Refused {Get-WindowsStatePortableFixtureCredential -VmId ([guid]::Empty)}
     foreach($foreign in @('C:/Windows','D:/user','E:/unowned')){Assert-Refused {Publish-WindowsStateRoundtrip -Root $foreign -VmId $id -Checkpoint $null -Baseline $null}}
     Assert-Refused {Restore-WindowsStateRoundtrip -ExpectedGeneration 'production'}
+    # Mutable producer state must be revalidated at live recovery boundaries.
+    $script:liveProducer=[ordered]@{status='in_progress';conclusion=$null;run_attempt=1;head_sha=('a'*40);event='workflow_dispatch';path='.github/workflows/windows-state-probe-validate.yml'}
+    function gh {$global:LASTEXITCODE=0;$script:liveProducer|ConvertTo-Json -Compress}
+    try {
+        Assert-WindowsStateLiveProducer -ProducerRun '123' -ProducerAttempt '1' -SourceSha ('a'*40)
+        foreach($case in @(@('status','completed'),@('conclusion','failure'),@('run_attempt',2),@('head_sha',('b'*40)),@('event','push'),@('path','other.yml'))){
+            $field=$case[0];$old=$script:liveProducer[$field]
+            try {$script:liveProducer[$field]=$case[1];Assert-Refused {Assert-WindowsStateLiveProducer -ProducerRun '123' -ProducerAttempt '1' -SourceSha ('a'*40)}}
+            finally {$script:liveProducer[$field]=$old}
+        }
+        # A producer accepted initially must be rejected after a later failure.
+        Assert-WindowsStateLiveProducer -ProducerRun '123' -ProducerAttempt '1' -SourceSha ('a'*40)
+        $script:liveProducer.status='completed';$script:liveProducer.conclusion='failure'
+        Assert-Refused {Assert-WindowsStateLiveProducer -ProducerRun '123' -ProducerAttempt '1' -SourceSha ('a'*40)}
+    } finally {Remove-Item Function:gh}
     Write-Output 'PORTABLE FIXTURE CREDENTIAL DETERMINISM + DOMAIN/CONTEXT REFUSALS: PASS'
 } finally {foreach($key in $keys){[Environment]::SetEnvironmentVariable($key,$previous[$key])}}
