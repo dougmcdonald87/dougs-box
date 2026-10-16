@@ -31,4 +31,9 @@ if(Test-Path -LiteralPath $failurePath -PathType Leaf){
     if($failure.schema -ne 1 -or $failure.runId -cne $expectedRun){throw 'Foreign recovery failure record refused.'}
     $result.recoveryFailure=$failure
 }
+# Read-only native provider inventory; no import, removal, or VM changes.
+$result.nativeInventory=@(Get-CimInstance -Namespace root/virtualization/v2 -ClassName Msvm_ComputerSystem -ErrorAction Stop|Where-Object {$_.Name -eq $expectedVm.ToString()}|Select-Object Name,ElementName,Caption,EnabledState)
+$result.plannedInventory=@(Get-CimInstance -Namespace root/virtualization/v2 -ClassName Msvm_PlannedComputerSystem -ErrorAction Stop|Where-Object {$_.Name -eq $expectedVm.ToString()}|Select-Object Name,ElementName,Caption)
+$result.getVmCommand=@(Get-Command Get-VM|Select-Object Name,CommandType,Source)
+$result.originPresent=Test-Path -LiteralPath 'E:/DevBox/Tools/WindowsStateProbe/probe-38647908553-1'
 $result|ConvertTo-Json -Depth 8 -Compress
