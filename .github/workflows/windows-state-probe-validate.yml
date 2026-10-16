@@ -385,12 +385,15 @@ jobs:
           if($LASTEXITCODE -ne 0){throw 'Pilot RDP receipt cross-step path tests failed; guest restore forbidden.'}
           python ./tests/windows-home-sid-acl.tests.py
           if($LASTEXITCODE -ne 0){throw 'Pilot SID-based control directory ACL regression test failed; guest restore forbidden.'}
+          python ./tests/windows-home-guest-owner.tests.py
+          if($LASTEXITCODE -ne 0){throw 'Guest owner account security/sequence tests failed before restore.'}
       - name: Restore, boot and verify isolated Windows 10 Home guest without deleting verified VM
         id: restore_guest
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
           RESTIC_PASSWORD: ${{ secrets.RESTIC_PASSWORD }}
+          DEVBOX_RDP_PASSWORD: ${{ secrets.DEVBOX_RDP_PASSWORD }}
         run: |
           $ErrorActionPreference='Stop'
           $env:DEVBOX_CONTROL_PATH=Join-Path $env:RUNNER_TEMP 'windows-home-restore-hold-rdp'
@@ -403,6 +406,7 @@ jobs:
           $result=@($parts|Where-Object {$_ -is [pscustomobject] -and $_.freshHostRestored -eq $true}|Select-Object -First 1)
           if($result.Count -ne 1){throw 'Verified guest restore result missing or ambiguous.'}
           $vm=$result[0]
+          ./scripts/windows-home-owner-account.ps1 -VmId ([guid]$vm.vmId) -Root $vm.root -OriginGeneration $vm.originGeneration
           ./scripts/windows-home-console.ps1 -Root $vm.root -VmId ([guid]$vm.vmId) -ExpectedGeneration $vm.generation -OriginGeneration $vm.originGeneration
           $controlDir=Join-Path $env:ProgramData ('WindowsHomePilot\'+$env:GITHUB_RUN_ID)
           Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value ('control_dir='+$controlDir)
