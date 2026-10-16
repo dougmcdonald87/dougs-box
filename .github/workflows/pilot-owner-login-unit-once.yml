@@ -1,0 +1,40 @@
+# One-off isolated and non-secret Windows script/test validation; no guest restore.
+name: One-time Windows Home guest-owner unit verification
+on:
+  push:
+    branches:
+      - pilot/windows-home-connection-20261015
+    paths:
+      - '.github/workflows/pilot-owner-login-unit-once.yml'
+permissions:
+  contents: read
+jobs:
+  verify-owner-helper:
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/pilot/windows-home-connection-20261015' &&
+      github.event.head_commit.message == 'test(pilot): verify owner login helper syntax and regression'
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 12
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - name: Run guest owner regression tests on real Windows
+        shell: pwsh
+        run: |
+          python ./tests/windows-home-guest-owner.tests.py
+          if($LASTEXITCODE -ne 0){throw 'Guest owner source/flow tests failed.'}
+          Write-Output 'PILOT_GUEST_OWNER_SOURCE_TESTS_OK=true'
+      - name: Verify Windows PowerShell parser accepts new helper
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $path=Join-Path $PWD 'scripts/windows-home-owner-account.ps1'
+          $tokens=$null
+          $errors=$null
+          [void][System.Management.Automation.Language.Parser]::ParseFile($path,[ref]$tokens,[ref]$errors)
+          if(@($errors).Count -ne 0){throw ('Pilot owner helper PowerShell parse failed: '+($errors | Out-String))}
+          Write-Output 'PILOT_GUEST_OWNER_POWERSHELL_PARSE_OK=true'
