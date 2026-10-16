@@ -22,4 +22,8 @@ foreach($sub in @('requests','responses')){
   finally{if($stream){$stream.Dispose()}}
  }
 }
-[ordered]@{host=$env:COMPUTERNAME;run=$session.runId;vmId=$session.vmId;generation=$session.generation;files=$records;utc=[DateTime]::UtcNow.ToString('o')}|ConvertTo-Json -Depth 6 -Compress
+$vm=Get-VM -Id $expectedVm -ErrorAction Stop
+$nic=@(Get-VMNetworkAdapter -VM $vm|Select-Object Name,SwitchName,Status,IPAddresses)
+$switches=@(Get-VMSwitch|Select-Object Name,SwitchType)
+$nats=@(Get-NetNat -ErrorAction SilentlyContinue|Select-Object Name,InternalIPInterfaceAddressPrefix)
+[ordered]@{vmState=$vm.State.ToString();network=$nic;switches=$switches;nats=$nats;host=$env:COMPUTERNAME;run=$session.runId;vmId=$session.vmId;generation=$session.generation;files=$records;utc=[DateTime]::UtcNow.ToString('o')}|ConvertTo-Json -Depth 6 -Compress
