@@ -2,28 +2,30 @@ $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 $expectedRun='38930283997'
 $expectedVm=[guid]'66b514d0-7246-493f-ade3-1f004cd12411'
-if($env:COMPUTERNAME -ine 'runnervm0xl3a'){throw 'Unexpected host; refusing diagnostic read.'}
+if($env:COMPUTERNAME -ine 'runnervm0xl3a'){throw 'Unexpected host; refusing guest link test.'}
 $control=Join-Path $env:ProgramData ('WindowsHomePilot\'+$expectedRun)
 $session=[IO.File]::ReadAllText((Join-Path $control 'session.json'))|ConvertFrom-Json
 if($session.runId -cne $expectedRun -or [guid]$session.vmId -ne $expectedVm){throw 'Live pilot identity mismatch.'}
-$records=@()
-foreach($sub in @('requests','responses')){
- foreach($file in [IO.Directory]::GetFiles((Join-Path $control $sub))){
-  $stream=$null
-  try{
-   $stream=[IO.File]::Open($file,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::ReadWrite)
-   $length=$stream.Length
-   $start=[Math]::Max(0,$length-32768)
-   [void]$stream.Seek($start,[IO.SeekOrigin]::Begin)
-   $buffer=New-Object byte[] ([int]($length-$start))
-   $count=$stream.Read($buffer,0,$buffer.Length)
-   $records+=[pscustomobject]@{folder=$sub;name=[IO.Path]::GetFileName($file);length=$length;tail=[Text.Encoding]::UTF8.GetString($buffer,0,$count)}
-  }catch{$records+=[pscustomobject]@{folder=$sub;name=[IO.Path]::GetFileName($file);error=$_.Exception.GetType().Name}}
-  finally{if($stream){$stream.Dispose()}}
- }
-}
 $vm=Get-VM -Id $expectedVm -ErrorAction Stop
-$nic=@(Get-VMNetworkAdapter -VM $vm|Select-Object Name,SwitchName,Status,IPAddresses)
-$switches=@(Get-VMSwitch|Select-Object Name,SwitchType)
-$nats=@(Get-NetNat -ErrorAction SilentlyContinue|Select-Object Name,InternalIPInterfaceAddressPrefix)
-[ordered]@{vmState=$vm.State.ToString();network=$nic;switches=$switches;nats=$nats;host=$env:COMPUTERNAME;run=$session.runId;vmId=$session.vmId;generation=$session.generation;files=$records;utc=[DateTime]::UtcNow.ToString('o')}|ConvertTo-Json -Depth 6 -Compress
+if($vm.State -ne 'Running' -or $vm.Name -cne 'DevBoxWindowsState-38647908553-1'){throw 'Unexpected guest state or identity.'}
+$adapters=@(Get-VMNetworkAdapter -VM $vm)
+if($adapters.Count -ne 1 -or -not [string]::IsNullOrEmpty($adapters[0].SwitchName)){throw 'Guest adapter no longer disconnected; refusing to change it.'}
+$target=Get-VMSwitch -Name 'nat' -ErrorAction Stop
+if($target.SwitchType.ToString() -cne 'Internal'){throw 'Expected existing internal switch only.'}
+$addressAssigned=$false
+try {
+ Connect-VMNetworkAdapter -VMNetworkAdapter $adapters[0] -SwitchName $target.Name -ErrorAction Stop
+ $end=[DateTime]::UtcNow.AddSeconds(45)
+ do {
+  Start-Sleep -Seconds 5
+  $current=Get-VMNetworkAdapter -VM $vm
+  foreach($raw in $current.IPAddresses){
+   $ip=$null
+   if([Net.IPAddress]::TryParse($raw,[ref]$ip) -and $ip.AddressFamily -eq [Net.Sockets.AddressFamily]::InterNetwork -and $raw -notmatch '^(169\.254\.|127\.|0\.)'){$addressAssigned=$true}
+  }
+ }while(-not $addressAssigned -and [DateTime]::UtcNow -lt $end)
+} finally {
+ Disconnect-VMNetworkAdapter -VMNetworkAdapter (Get-VMNetworkAdapter -VM $vm) -ErrorAction Stop
+}
+$final=Get-VMNetworkAdapter -VM $vm
+[ordered]@{test='guest-link-dhcp';addressAssigned=$addressAssigned;restoredDisconnected=[string]::IsNullOrEmpty($final.SwitchName);vmStillRunning=((Get-VM -Id $expectedVm).State.ToString() -ceq 'Running')}|ConvertTo-Json -Compress
