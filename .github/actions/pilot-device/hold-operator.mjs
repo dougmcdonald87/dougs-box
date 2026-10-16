@@ -10,7 +10,7 @@ const generationPattern=/^devbox-checkpoint-v1-ci-[1-9]\d*-[1-9]\d*-[0-9]{8}T[0-
 const vmPattern=/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/;
 
 export async function holdOperatorSession({controlDir,workspace,runId,
-  now=Date.now,sleep=delay,drain=drainOperatorRequests,executor=runOperatorPowerShell,maxMs=300*60*1000}){
+  now=Date.now,sleep=delay,drain=drainOperatorRequests,executor=runOperatorPowerShell,maxMs=300*60*1000,signal=undefined}){
  if(!controlDir||!workspace||!runId||!Number.isFinite(maxMs)||maxMs<=0||maxMs>300*60*1000){
   throw Error('Invalid first-party hold parameters');
  }
@@ -24,11 +24,13 @@ export async function holdOperatorSession({controlDir,workspace,runId,
  const stopAt=now()+maxMs;
  let processed=0;
  while(now()<stopAt){
+  if(signal?.aborted)throw Error('Operator hold aborted after terminal loss');
   const outcome=await drain({root:controlDir,session,
    executor:request=>executor(request,{controlDir,workspace})});
   processed+=outcome.processed;
   if(outcome.verifiedFinish===true)return {completedFinish:true,processed};
   await sleep(10000);
+  if(signal?.aborted)throw Error('Operator hold aborted after terminal loss');
  }
  return {completedFinish:false,reason:'hold-expired',processed};
 }
