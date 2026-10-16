@@ -12,7 +12,7 @@ jobs:
     if: >-
       github.event_name == 'push' &&
       github.ref == 'refs/heads/pilot/windows-home-connection-20261015' &&
-      github.event.head_commit.message == 'test(pilot): verify real Windows C recovery without host desktop'
+      github.event.head_commit.message == 'test(pilot): retry cold C verification from complete tree'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
