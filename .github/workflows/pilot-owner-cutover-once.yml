@@ -1,0 +1,64 @@
+# Single-use owner-authorized pilot replacement; no original DevBox involvement.
+name: One-time pilot guest owner account cutover
+on:
+  push:
+    branches:
+      - pilot/windows-home-connection-20261015
+    paths:
+      - '.github/workflows/pilot-owner-cutover-once.yml'
+permissions:
+  contents: read
+jobs:
+  cutover:
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/pilot/windows-home-connection-20261015' &&
+      github.event.head_commit.message == 'chore(pilot): replace unused sign-in runner with guest-owner login test'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Safely retire disposable pilot sign-in-only session
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          OLD_RUN: '38826540935'
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'dougmcdonald87/dougs-box'
+          test "$GITHUB_REF" = 'refs/heads/pilot/windows-home-connection-20261015'
+          info="$(gh api "repos/$GH_REPO/actions/runs/$OLD_RUN")"
+          printf '%s' "$info" | jq -e --arg branch 'pilot/windows-home-connection-20261015' \
+            '.head_branch == $branch and .name == "Windows Home persistence probe guards" and .event == "workflow_dispatch"' >/dev/null
+          state="$(printf '%s' "$info" | jq -r '.status')"
+          if [ "$state" != "completed" ]; then
+            gh api --method POST "repos/$GH_REPO/actions/runs/$OLD_RUN/cancel" >/dev/null
+            echo 'PILOT_OLD_SIGNIN_RUN_CANCEL_REQUESTED=true'
+            for i in $(seq 1 90); do
+              sleep 3
+              state="$(gh api "repos/$GH_REPO/actions/runs/$OLD_RUN" --jq '.status')"
+              if [ "$state" = "completed" ]; then break; fi
+            done
+          else
+            echo 'PILOT_OLD_SIGNIN_RUN_ALREADY_COMPLETE=true'
+          fi
+          test "$state" = "completed" || { echo 'Old pilot not stopped, refuse new launch'; exit 1; }
+          conclusion="$(gh api "repos/$GH_REPO/actions/runs/$OLD_RUN" --jq '.conclusion')"
+          echo "PILOT_OLD_SIGNIN_RUN_COMPLETED_WITH=$conclusion"
+      - name: Dispatch only owner-login-enabled isolated Windows Home VM
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'dougmcdonald87/dougs-box'
+          test "$GITHUB_REF" = 'refs/heads/pilot/windows-home-connection-20261015'
+          gh workflow run 'windows-state-probe-validate.yml' \
+            --repo "$GH_REPO" \
+            --ref 'pilot/windows-home-connection-20261015' \
+            --field transfer_phase=restore-hold \
+            --field expected_generation='devbox-checkpoint-v1-ci-38647908553-1-20261014T225101Z-eb2366ef7dc34ea4aee45c30bbc721b6' \
+            --field expected_source_sha=''
+          echo 'PILOT_OWNER_LOGIN_RESTORE_DISPATCH_ACCEPTED=true'
