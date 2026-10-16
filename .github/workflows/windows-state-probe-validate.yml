@@ -472,7 +472,7 @@ jobs:
           audience: 'api.tailscale.com/Tf3m25iN2121CNTRL-k9nitZxGTS11CNTRL'
           tags: tag:windows-home-pilot
           hostname: pilot-live-probe-${{ github.run_id }}
-      - name: Probe existing server and attempt read-only WinRM identity
+      - name: Run scoped command on verified existing pilot
         shell: bash
         env:
           PILOT_OWNER_PASSWORD: ${{ secrets.DEVBOX_RDP_PASSWORD }}
