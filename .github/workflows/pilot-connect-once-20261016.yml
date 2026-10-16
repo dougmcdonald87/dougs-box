@@ -1,0 +1,35 @@
+# Single-use owner-approved independent restore verification; no user VM changes.
+# Restricted to the pilot branch; never launches original DevBox or production workflows.
+name: One-time diskless native compatibility check
+on:
+  push:
+    branches: [pilot/windows-home-connection-20261015]
+    paths: ['.github/workflows/pilot-connect-once-20261016.yml']
+permissions:
+  contents: read
+jobs:
+  kickoff:
+    if: >-
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/pilot/windows-home-connection-20261015' &&
+      github.event.head_commit.message == 'test(pilot): run diskless native compatibility check'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Dispatch exactly one replacement connection probe
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = 'dougmcdonald87/dougs-box'
+          test "$GITHUB_REF" = 'refs/heads/pilot/windows-home-connection-20261015'
+          gh workflow run 'windows-state-probe-validate.yml' \
+            --repo "$GH_REPO" \
+            --ref 'pilot/windows-home-connection-20261015' \
+            --field transfer_phase=native-compatibility
+          echo 'PILOT_ONE_SHOT_RDP_PROBE_DISPATCH_ACCEPTED=true'
+
