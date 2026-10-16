@@ -22,13 +22,17 @@ class CheckpointManifestTests(unittest.TestCase):
     def test_whole_inventory_and_identity_pass(self):
         m=self.manifest();self.verify(m);self.assertEqual({x['path'] for x in m['files']},{self.config,self.disk})
     def test_snapshot_filename_is_not_vm_identity(self):
-        original=self.root/self.config
-        alternate='Virtual Machines/'+str(uuid.uuid4())+'.vmcx'
-        original.rename(self.root/alternate);self.config=alternate
-        accepted=True
-        try:self.verify(self.manifest())
-        except module.ManifestError:accepted=False
-        self.assertTrue(accepted,'A checkpoint filename may differ from its embedded VM identity')
+        alternate=self.root/('Snapshots/'+str(uuid.uuid4())+'.vmcx')
+        alternate.parent.mkdir();alternate.write_bytes(b'opaque native snapshot fixture')
+        self.verify(self.manifest())
+    def test_foreign_main_config_refused(self):
+        alternate=self.root/('Virtual Machines/'+str(uuid.uuid4())+'.vmcx')
+        (self.root/self.config).rename(alternate)
+        with self.assertRaises(module.ManifestError):self.manifest()
+    def test_unexpected_extra_main_config_refused(self):
+        alternate=self.root/('Virtual Machines/'+str(uuid.uuid4())+'.vmcx')
+        alternate.write_bytes(b'foreign main configuration')
+        with self.assertRaises(module.ManifestError):self.manifest()
     def test_explicit_data_consistent_capture_passes(self):
         accepted=False
         try:

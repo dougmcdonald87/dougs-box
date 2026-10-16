@@ -537,6 +537,9 @@ jobs:
       - name: Test exact-generation refusals before native recovery
         shell: pwsh
         run: |
+          ./tests/windows-state-source-parse.tests.ps1
+          python ./tests/windows-state-checkpoint.tests.py
+          if ($LASTEXITCODE -ne 0) { throw 'Checkpoint manifest regression tests failed' }
           python ./tests/windows-state-transfer.tests.py
           if ($LASTEXITCODE -ne 0) { throw 'Transfer refusal regression tests failed' }
           ./tests/windows-state-roundtrip.tests.ps1
