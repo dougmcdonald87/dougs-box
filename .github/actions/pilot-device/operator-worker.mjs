@@ -43,7 +43,14 @@ export async function drainOperatorRequests({root,session,executor,nowMs=undefin
     await saveReceipt(root,req,'verified',{generation:result.generation});
     if(req.operation==='Finish')verifiedFinish=true;
    }else await saveReceipt(root,req,'failed',{reason:'publisher-not-verified'});
-  }catch{await saveReceipt(root,req,'failed',{reason:'executor-failed'});}
+  }catch(error){
+   const extra={reason:'executor-failed'};
+   if(Number.isInteger(error?.operatorExitCode)&&error.operatorExitCode>=0&&error.operatorExitCode<=2147483647){
+    extra.exitCode=error.operatorExitCode;
+    extra.diagnosticFile=`.operator-${req.operationId}.log`;
+   }
+   await saveReceipt(root,req,'failed',extra);
+  }
   finally{await unlink(working);processed++;}
  }
  return {processed,verifiedFinish};

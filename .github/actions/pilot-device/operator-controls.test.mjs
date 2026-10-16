@@ -55,3 +55,12 @@ test('operator executor invokes PowerShell without a command shell or credential
  assert.equal(calls[0].exe,'pwsh.exe');
  assert.doesNotMatch(calls[0].args.join(' '),/GH_TOKEN|RESTIC_PASSWORD/);
 });
+test('failed publisher receipt identifies exit code without leaking exception text',async()=>sandbox(async root=>{
+ await writeFile(path(root),JSON.stringify(req));
+ await drainOperatorRequests({root,session,nowMs:now,executor:async()=>{
+  const error=Error('synthetic-private-value');error.operatorExitCode=17;throw error;
+ }});
+ const text=await readFile(response(root),'utf8');
+ assert.equal(JSON.parse(text).exitCode,17);
+ assert.doesNotMatch(text,/synthetic-private-value/);
+}));

@@ -28,7 +28,15 @@ async function stopTree(pid){
  const child=spawnTask('taskkill.exe',['/PID',String(pid),'/T','/F'],{stdio:'ignore'});
  await new Promise(resolve=>{child.once('exit',resolve);child.once('error',resolve);});
 }
-export async function supervise(){
+// Losing an optional assistant terminal must not terminate the owner's RDP
+// session or its independent first-party Save/Finish publisher.
+export async function holdWithOptionalTerminal({hold,terminal,report}){
+ const controller=new AbortController();
+ const pairing=Promise.resolve().then(()=>terminal(controller.signal)).catch(()=>report());
+ try{return await hold();}
+ finally{controller.abort();await pairing;}
+}
+async function pairRestrictedTerminal({signal}){
  if(process.env.GITHUB_ACTIONS!=='true'||process.env.DEVBOX_ISOLATED_TEST!=='1'||
    process.env.GITHUB_EVENT_NAME!=='workflow_dispatch'||
    process.env.GITHUB_REF!=='refs/heads/pilot/windows-home-connection-20261015'||
@@ -56,36 +64,46 @@ export async function supervise(){
   let ready=false;
   const start=Date.now();
   while(Date.now()-start<300000){
+   if(signal.aborted)return;
    if(/PILOT_RESTRICTED_IDENTITY_SENTINEL_DENIAL_OK=true/.test(output)&&pairingReady(output)){
     ready=true;break;
    }
    if(exited||output.length===131072)break;
    await delay(1000);
   }
-  if(!ready||exited)throw Error('Restricted pairing agent did not pass identity/read-denial and device-code gates');
-  const payload=JSON.stringify({runId,ready:true,diagnostics:output});
+  if(signal.aborted)return;
+  // Even a denied native probe needs private diagnostic evidence. The payload
+  // remains RSA-encrypted; plaintext is never forwarded to the Actions log.
+  const payload=JSON.stringify({runId,ready:ready&&!exited,diagnostics:output});
   const root=process.env.RUNNER_TEMP;
   if(!root)throw Error('Temporary pairing root unavailable');
   const encrypted=join(root,'windows-home-pilot-pairing.encrypted.txt');
   await writeFile(encrypted,encryptPairing(payload,rsa),{mode:0o600,flag:'wx'});
   const {DefaultArtifactClient}=await import('@actions/artifact');
   const {id}=await new DefaultArtifactClient().uploadArtifact('windows-home-pilot-pairing-'+runId,[encrypted],root,{retentionDays:1});
-  console.log('PILOT_RESTRICTED_DEVICE_READY=true');
   console.log('PILOT_ENCRYPTED_ARTIFACT_ID='+id);
-  const abort=new AbortController();
-  const lostAgent=new Promise((_,reject)=>{
-   child.once('exit',()=>{abort.abort();reject(Error('Restricted terminal exited during operator hold'));});
-   child.once('error',()=>{abort.abort();reject(Error('Restricted terminal failed during operator hold'));});
-  });
-  const {holdOperatorSession}=await import('./hold-operator.mjs');
-  const outcome=await Promise.race([
-   holdOperatorSession({controlDir,workspace,runId,signal:abort.signal}),lostAgent
-  ]);
-  console.log(outcome.completedFinish?'PILOT_VERIFIED_FINISH_HOLD_COMPLETE':'PILOT_HOLD_EXPIRED_WITHOUT_VERIFIED_FINISH');
-  console.log('PILOT_OWNER_REQUESTS_PROCESSED='+outcome.processed);
+  if(!ready||exited)throw Error('Restricted pairing agent did not pass identity/read-denial and device-code gates');
+  console.log('PILOT_RESTRICTED_DEVICE_READY=true');
+  while(!signal.aborted&&!exited)await delay(1000);
+  if(exited&&!signal.aborted)throw Error('Restricted terminal exited');
  } finally {
   await stopTree(child.pid);
  }
+}
+export async function supervise(){
+ if(process.env.GITHUB_ACTIONS!=='true'||process.env.DEVBOX_ISOLATED_TEST!=='1'||
+   process.env.GITHUB_EVENT_NAME!=='workflow_dispatch'||
+   process.env.GITHUB_REF!=='refs/heads/pilot/windows-home-connection-20261015'||
+   process.env.GITHUB_REPOSITORY!=='dougmcdonald87/dougs-box')throw Error('Pilot identity refused');
+ const {holdOperatorSession}=await import('./hold-operator.mjs');
+ const outcome=await holdWithOptionalTerminal({
+  hold:()=>holdOperatorSession({controlDir:process.env.WINDOWS_HOME_CONTROL_DIR,
+   workspace:process.env.GITHUB_WORKSPACE,runId:process.env.GITHUB_RUN_ID}),
+  terminal:signal=>pairRestrictedTerminal({signal}),
+  report:()=>console.log('PILOT_OPTIONAL_TERMINAL_UNAVAILABLE_OWNER_HOLD_CONTINUES')
+ });
+ console.log(outcome.completedFinish?'PILOT_VERIFIED_FINISH_HOLD_COMPLETE':'PILOT_HOLD_EXPIRED_WITHOUT_VERIFIED_FINISH');
+ console.log('PILOT_OWNER_REQUESTS_PROCESSED='+outcome.processed);
 }
 if(process.argv[1]&&fileURLToPath(import.meta.url)===process.argv[1]){
  try{await supervise();}catch(e){console.error('PILOT_RESTRICTED_PAIRING_FAILED='+e.name);process.exitCode=1;}
