@@ -32,11 +32,17 @@ $cred=Get-WindowsStatePortableFixtureCredential -VmId $vmId
 $guest=New-PSSession -VMId $vmId -Credential $cred -ErrorAction Stop
 try{$baseline=Get-WindowsStateFixture -GuestSession $guest -VmId $vmId}
 finally{Remove-PSSession $guest}
-$checkpoint=Export-WindowsStateCheckpoint -Root $info.root -VmId $vmId -Mode $Operation.ToLowerInvariant()
+$checkpoint=Export-WindowsStateCheckpoint -Root $info.root -VmId $vmId -Mode 'save'
 $result=Publish-WindowsStateRoundtrip -Root $info.root -VmId $vmId -Checkpoint $checkpoint -Baseline $baseline -InteractiveSessionPath (Join-Path $ControlDir 'session.json')
 if($result.published -ne $true -or $result.vmId -cne $vmId.ToString() -or
    $result.generation -cnotmatch ('^devbox-checkpoint-v1-ci-'+[regex]::Escape($env:GITHUB_RUN_ID)+'-'+[regex]::Escape($env:GITHUB_RUN_ATTEMPT)+'-')){
  throw 'Publisher returned no accepted exact-current-run generation.'
+}
+if($Operation -eq 'Finish'){
+    Stop-VM -VM (Get-VM -Id $vmId -ErrorAction Stop) -ErrorAction Stop
+    $deadline=[DateTime]::UtcNow.AddMinutes(2)
+    while((Get-VM -Id $vmId).State -ne 'Off' -and [DateTime]::UtcNow -lt $deadline){Start-Sleep -Seconds 5}
+    if((Get-VM -Id $vmId).State -ne 'Off'){throw 'Backup published but shutdown unconfirmed.'}
 }
 [ordered]@{schema=1;operationId=$OperationId.ToString('D');vmId=$vmId.ToString('D');operation=$Operation;generation=$result.generation;verified=$true}|
  ConvertTo-Json -Compress|Set-Content -LiteralPath $output -Encoding utf8 -ErrorAction Stop
