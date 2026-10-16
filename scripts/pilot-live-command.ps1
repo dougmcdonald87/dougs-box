@@ -36,4 +36,24 @@ $result.nativeInventory=@(Get-CimInstance -Namespace root/virtualization/v2 -Cla
 $result.plannedInventory=@(Get-CimInstance -Namespace root/virtualization/v2 -ClassName Msvm_PlannedComputerSystem -ErrorAction Stop|Where-Object {$_.Name -eq $expectedVm.ToString()}|Select-Object Name,ElementName,Caption)
 $result.getVmCommand=@(Get-Command Get-VM|Select-Object Name,CommandType,Source)
 $result.originPresent=Test-Path -LiteralPath 'E:/DevBox/Tools/WindowsStateProbe/probe-38647908553-1'
+# Controlled comparison only, on the recovered disposable copy. No import,
+# saved-state removal, network change, start, stop or disk deletion.
+if($result.vmRegistered -or $result.nativeInventory.Count -or $result.plannedInventory.Count){throw 'Diagnostic comparison refuses occupied identity.'}
+$root='E:/DevBox/Tools/WindowsStateProbe/probe-38647908553-1'
+$manifests=@(Get-ChildItem -LiteralPath (Join-Path $root 'checkpoints') -Filter manifest.json -Recurse -File)
+if($manifests.Count -ne 1){throw 'Diagnostic manifest ambiguous.'}
+$m=Get-Content -LiteralPath $manifests[0].FullName -Raw|ConvertFrom-Json
+if([guid]$m.vm_id -ne $expectedVm){throw 'Diagnostic manifest identity mismatch.'}
+$payload=Join-Path $manifests[0].DirectoryName 'payload'
+$config=Join-Path $payload $m.config
+$dirs=@($m.disks|ForEach-Object {Split-Path (Join-Path $payload $_.path) -Parent}|Sort-Object -Unique)
+if($dirs.Count -ne 1 -or -not (Test-Path -LiteralPath $config -PathType Leaf)){throw 'Diagnostic comparison layout refused.'}
+$r=Compare-VM -Path $config -Copy -VhdSourcePath $dirs[0] -VirtualMachinePath (Join-Path $root $m.vm_name) -VhdDestinationPath (Join-Path $root 'restored-disks') -SnapshotFilePath (Join-Path $root 'restored-snapshots') -ErrorAction Stop
+$result.readOnly=$false
+$result.comparisonOnly=$true
+$result.reportVm=$r.VM|Select-Object Id,Name,State,Path,IsPlanned,Version
+$result.afterCompareVm=@(Get-VM -Id $expectedVm -ErrorAction SilentlyContinue|Select-Object Id,Name,State,Path,IsPlanned,Version)
+$result.afterNative=@(Get-CimInstance -Namespace root/virtualization/v2 -ClassName Msvm_ComputerSystem|Where-Object {$_.Name -eq $expectedVm.ToString()}|Select-Object Name,ElementName,Caption,EnabledState)
+$result.afterPlanned=@(Get-CimInstance -Namespace root/virtualization/v2 -ClassName Msvm_PlannedComputerSystem|Where-Object {$_.Name -eq $expectedVm.ToString()}|Select-Object Name,ElementName,Caption)
+$result.issues=@($r.Incompatibilities|ForEach-Object {[ordered]@{messageId=$_.MessageId;message=$_.Message;sourceType=$_.Source.GetType().FullName;sourceVmId=[string]$_.Source.VMId;sourceId=[string]$_.Source.Id}})
 $result|ConvertTo-Json -Depth 8 -Compress
