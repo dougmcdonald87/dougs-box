@@ -25,7 +25,7 @@ on:
       transfer_phase:
         description: 'Isolated native probe, encrypted whole Windows producer, or independently fresh restore'
         type: choice
-        options: [probe, publish, restore, restore-hold, tailnet-preflight, transport-probe, operator, process-probe, artifact-probe]
+        options: [probe, publish, restore, restore-hold, tailnet-preflight, transport-probe, operator, process-probe, artifact-probe, restricted-agent-probe]
         default: probe
       transport_full_part:
         description: 'Use a full512MiB random non-user probe payload instead of32bytes'
@@ -428,3 +428,22 @@ jobs:
           $ErrorActionPreference='Stop'
           node .github/actions/pilot-device/supervise-restricted.mjs
           if($LASTEXITCODE -ne 0){throw 'Restricted terminal / first-party Save Finish supervision failed.'}
+
+  restricted-agent-probe:
+    name: Pilot native restricted-token denial (synthetic only)
+    if: github.event_name == 'workflow_dispatch' && inputs.transfer_phase == 'restricted-agent-probe'
+    runs-on: windows-2025-vs2026
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    env:
+      DEVBOX_ISOLATED_TEST: '1'
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - name: Test disposable Windows token and synthetic ACL refusals without VM
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          ./tests/windows-home-native-isolation.probe.ps1
