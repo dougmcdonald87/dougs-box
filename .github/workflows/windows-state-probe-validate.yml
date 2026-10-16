@@ -25,7 +25,7 @@ on:
       transfer_phase:
         description: 'Isolated native probe, encrypted whole Windows producer, or independently fresh restore'
         type: choice
-        options: [probe, publish, restore, restore-hold, tailnet-preflight, transport-probe, operator, process-probe, artifact-probe, restricted-agent-probe]
+        options: [probe, publish, restore, restore-hold, tailnet-preflight, transport-probe, operator, process-probe, artifact-probe, restricted-agent-probe, live-host-probe]
         default: probe
       transport_full_part:
         description: 'Use a full512MiB random non-user probe payload instead of32bytes'
@@ -447,3 +447,62 @@ jobs:
         run: |
           $ErrorActionPreference='Stop'
           ./tests/windows-home-native-isolation.probe.ps1
+
+  live-host-probe:
+    if: github.event_name == 'workflow_dispatch' && inputs.transfer_phase == 'live-host-probe' && github.ref == 'refs/heads/pilot/windows-home-connection-20261015'
+    runs-on: ubuntu-latest
+    environment: devbox
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - name: Verify same pilot-only tailnet identity
+        shell: pwsh
+        env:
+          DEVBOX_ISOLATED_TEST: '1'
+        run: ./scripts/windows-home-tailnet-oidc.ps1 -ClientId 'Tf3m25iN2121CNTRL-k9nitZxGTS11CNTRL'
+      - name: Connect diagnostic client to existing pilot only
+        uses: tailscale/github-action@d1b6cd204f8dceda5b3eaad7f1f767be390056cd
+        with:
+          oauth-client-id: 'Tf3m25iN2121CNTRL-k9nitZxGTS11CNTRL'
+          audience: 'api.tailscale.com/Tf3m25iN2121CNTRL-k9nitZxGTS11CNTRL'
+          tags: tag:windows-home-pilot
+          hostname: pilot-live-probe-${{ github.run_id }}
+      - name: Probe existing server and attempt read-only WinRM identity
+        shell: bash
+        env:
+          PILOT_OWNER_PASSWORD: ${{ secrets.DEVBOX_RDP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/pilot-winrm"
+          "$RUNNER_TEMP/pilot-winrm/bin/python" - <<'PYTHON'
+          import ipaddress,json,socket,subprocess,sys,os
+          target='windows-home-pilot-38930283997'
+          state=json.loads(subprocess.check_output(['tailscale','status','--json']))
+          peers=[p for p in state.get('Peer',{}).values() if p.get('DNSName','').split('.')[0]==target or p.get('HostName')==target]
+          if len(peers)!=1:raise SystemExit('Expected exactly one current pilot peer; no other host probed.')
+          ips=[s for s in peers[0].get('TailscaleIPs',[]) if ':' not in s]
+          if len(ips)!=1 or ipaddress.ip_address(ips[0]) not in ipaddress.ip_network('100.64.0.0/10'):raise SystemExit('Pilot private IPv4 refused.')
+          ip=ips[0];ports={}
+          print('TARGET_CURRENT_PILOT='+target,flush=True)
+          for port in [3389,5985,5986,22]:
+              try:
+                  with socket.create_connection((ip,port),timeout=5):ports[port]=True
+              except OSError:ports[port]=False
+          print('PILOT_PORTS='+json.dumps(ports),flush=True)
+          if not ports[5985]:raise SystemExit(0)
+          subprocess.run([sys.executable,'-m','pip','install','--disable-pip-version-check','--quiet','pywinrm==0.5.0'],check=True)
+          import winrm
+          password=os.environ.get('PILOT_OWNER_PASSWORD')
+          if not password:raise SystemExit('Existing owner credential unavailable.')
+          try:
+              session=winrm.Session('http://'+ip+':5985/wsman',auth=('runneradmin',password),transport='ntlm',message_encryption='always',operation_timeout_sec=15,read_timeout_sec=20)
+              result=session.run_ps("hostname; whoami; Test-Path -LiteralPath 'C:\\ProgramData\\WindowsHomePilot\\38930283997'; Get-VM -Id '66b514d0-7246-493f-ade3-1f004cd12411' | Select-Object -ExpandProperty Id")
+              print('PILOT_WINRM_EXIT='+str(result.status_code),flush=True)
+              if result.status_code==0:print(result.std_out.decode('utf-8',errors='replace'),flush=True)
+          except Exception as error:print('PILOT_WINRM_ERROR_CLASS='+type(error).__name__,flush=True)
+          PYTHON
