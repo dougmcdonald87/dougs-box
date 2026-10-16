@@ -684,4 +684,5 @@ jobs:
             if(@($volumes|Where-Object {$_.DriveType -eq 4 -or $_.ProviderName}).Count){throw 'Guest has an unexpected network drive.'}
             if(@($volumes|Where-Object {$_.DriveType -eq 3 -and $_.DeviceID -cne 'C:'}).Count){throw 'Guest has an unexpected additional fixed drive.'}
           } finally {Remove-PSSession $session}
-          Stop-VM -Id $id -ErrorAction Stop
+          Stop-VM -VM (Get-VM -Id $id -ErrorAction Stop) -ErrorAction Stop
+          if((Get-VM -Id $id -ErrorAction Stop).State -ne 'Off'){throw 'Verification guest shutdown unconfirmed.'}
