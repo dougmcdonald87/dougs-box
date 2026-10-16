@@ -2,7 +2,7 @@ $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 if($env:GITHUB_REF -cne 'refs/heads/pilot/windows-home-connection-20261015'){throw 'Pilot branch only.'}
 $name='PilotCompatibility-'+$env:GITHUB_RUN_ID
-$switch='nat'
+$switch='PilotMissing-'+$env:GITHUB_RUN_ID
 $root=Join-Path $env:RUNNER_TEMP $name
 if((Get-VM -Name $name -ErrorAction SilentlyContinue) -or (Get-VMSwitch -Name $switch -ErrorAction SilentlyContinue) -or (Test-Path $root)){throw 'Disposable identities occupied.'}
 New-Item -ItemType Directory $root|Out-Null
@@ -20,13 +20,20 @@ Write-Host ('NATIVE_COMPATIBILITY_SOURCE='+($diagnostic|ConvertTo-Json -Depth 8 
 if(@($r.Incompatibilities|Where-Object {$_.MessageId -eq 33012}).Count -ne 1){throw 'Missing-switch native condition not reproduced.'}
 Write-Host 'NATIVE_MISSING_SWITCH_REPRODUCED=true'
 
-. (Join-Path $PSScriptRoot '../scripts/windows-state-checkpoint.ps1')
-New-VMSwitch -Name 'nat' -SwitchType Internal|Out-Null
+# Keep any preexisting nat switch untouched. Exercise the same native resolver
+# with only the expected resource-name constant changed to our owned switch.
+# Do not alter the native report, source objects, or command implementations.
+$t=$null;$e=$null
+$a=[System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot '../scripts/windows-state-checkpoint.ps1'),[ref]$t,[ref]$e)
+if($e.Count){throw 'Resolver parser failed.'}
+$f=$a.Find({param($n)$n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Resolve-WindowsStateImportCompatibility'},$true).Extent.Text
+Invoke-Expression $f.Replace("'nat'",("'"+$switch+"'"))
+New-VMSwitch -Name $switch -SwitchType Internal|Out-Null
 $r=Resolve-WindowsStateImportCompatibility -Report $r -ExpectedVmId $id -ExpectedName $name -ExpectedVersion $diagnostic.version
 if(@($r.Incompatibilities|Where-Object {$_}).Count){throw 'Native correction left incompatibilities.'}
 $imported=Import-VM -CompatibilityReport $r -ErrorAction Stop
 if($imported.Id -ne $id -or $imported.Name -cne $name -or [string]$imported.Version -cne $diagnostic.version){throw 'Native import identity changed.'}
-if(@(Get-VMNetworkAdapter -VM $imported|Where-Object {$_.SwitchName -ceq 'nat'}).Count -ne 1){throw 'Native import switch remap failed.'}
-Write-Host 'NATIVE_NAT_CORRECTION_AND_IMPORT_VERIFIED=true'
+if(@(Get-VMNetworkAdapter -VM $imported|Where-Object {$_.SwitchName -ceq $switch}).Count -ne 1){throw 'Native import switch remap failed.'}
+Write-Host 'NATIVE_OWNED_SWITCH_CORRECTION_AND_IMPORT_VERIFIED=true'
 Remove-VM -VM $imported -Force
-Remove-VMSwitch -Name 'nat' -Force
+Remove-VMSwitch -Name $switch -Force

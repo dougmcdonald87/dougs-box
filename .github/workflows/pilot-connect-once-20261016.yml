@@ -12,7 +12,7 @@ jobs:
     if: >-
       github.event_name == 'push' &&
       github.ref == 'refs/heads/pilot/windows-home-connection-20261015' &&
-      github.event.head_commit.message == 'test(pilot): verify native blank-switch correction and import'
+      github.event.head_commit.message == 'test(pilot): verify owned-switch native correction without changing existing nat'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
