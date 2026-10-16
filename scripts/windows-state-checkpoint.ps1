@@ -147,7 +147,11 @@ function Import-WindowsStateCheckpoint {
         if($sourceDirectories.Count -ne 1){throw 'Export disk layout requires explicit supported source directory.'}
         $report=Compare-VM -Path $config -Copy -VhdSourcePath $sourceDirectories[0] -VirtualMachinePath $vmPath -VhdDestinationPath $diskPath -SnapshotFilePath $snapshotPath -ErrorAction Stop
         $issues=@($report.Incompatibilities | Where-Object {$_})
-        if($issues.Count -or $report.VM.Id -ne $VmId -or $report.VM.Name -cne $owner.name -or $report.VM.Version.ToString() -cne $record.configuration_version){throw 'Hyper-V compatibility or preserved identity check refused import.'}
+        if($issues.Count -or $report.VM.Id -ne $VmId -or $report.VM.Name -cne $owner.name -or $report.VM.Version.ToString() -cne $record.configuration_version){
+            $detail=[ordered]@{expectedId=$VmId.ToString();actualId=[string]$report.VM.Id;expectedName=$owner.name;actualName=$report.VM.Name;expectedVersion=$record.configuration_version;actualVersion=[string]$report.VM.Version;issues=@($issues|ForEach-Object {[ordered]@{messageId=$_.MessageId;message=$_.Message;sourceType=$_.Source.GetType().FullName}})}
+            Write-Host ('WINDOWS_STATE_IMPORT_REFUSAL_DETAIL='+($detail|ConvertTo-Json -Depth 6 -Compress))
+            throw 'Hyper-V compatibility or preserved identity check refused import.'
+        }
         $vm=Import-VM -CompatibilityReport $report -ErrorAction Stop
         if($vm.Id -ne $VmId -or $vm.Name -cne $owner.name -or -not (Test-WindowsStateProbeVmPath -Root $Root -VmName $owner.name -VmPath $vm.Path)){throw 'Imported VM identity/path did not match verified export.'}
         $importedDrives=@(Get-VMHardDiskDrive -VM $vm -ErrorAction Stop)
