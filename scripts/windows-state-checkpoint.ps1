@@ -123,22 +123,40 @@ function Resolve-WindowsStateImportCompatibility {
     if(-not $Report.VM -or $Report.VM.Id -ne $ExpectedVmId -or $Report.VM.Name -cne $ExpectedName -or [string]$Report.VM.Version -cne $ExpectedVersion){throw 'Import report identity/version mismatch; no network correction allowed.'}
     $issues=@($Report.Incompatibilities|Where-Object {$_})
     if(-not $issues.Count){return $Report}
+    if(Get-VM -Id $ExpectedVmId -ErrorAction SilentlyContinue){throw 'Compatibility correction refuses a registered VM.'}
     foreach($issue in $issues){
-        if($issue.MessageId -ne 33012 -or -not $issue.Source -or
-           $issue.Source.PSObject.TypeNames -notcontains 'Microsoft.HyperV.PowerShell.VMNetworkAdapter' -or
-           $issue.Source.VMId -ne $ExpectedVmId -or $issue.Source.SwitchName -cne 'nat'){
-            throw 'Unexpected import incompatibility; no network correction allowed.'
+        if(-not $issue.Source -or $issue.Source.VMId -ne $ExpectedVmId){throw 'Foreign compatibility source refused.'}
+        switch([int]$issue.MessageId){
+            33012 {
+                if($issue.Source.PSObject.TypeNames -notcontains 'Microsoft.HyperV.PowerShell.VMNetworkAdapter' -or $issue.Source.SwitchName -cne 'nat'){
+                    throw 'Unexpected missing-switch source refused.'
+                }
+            }
+            24002 {
+                if($issue.Source.PSObject.TypeNames -notcontains 'Microsoft.HyperV.PowerShell.VMSnapshot' -or [guid]$issue.Source.Id -eq [guid]::Empty -or [guid]$issue.Source.Id -eq $ExpectedVmId){
+                    throw 'Only an owned historical checkpoint CPU state may be cleared.'
+                }
+            }
+            default {throw 'Unexpected import incompatibility; no correction allowed.'}
         }
     }
-    $targets=@(Get-VMSwitch -Name 'nat' -ErrorAction Stop)
-    if($targets.Count -ne 1 -or $targets[0].SwitchType.ToString() -cne 'Internal'){throw 'Expected existing internal nat switch unavailable.'}
-    foreach($issue in $issues){Connect-VMNetworkAdapter -VMNetworkAdapter $issue.Source -SwitchName $targets[0].Name -ErrorAction Stop}
+    $networkIssues=@($issues|Where-Object {$_.MessageId -eq 33012})
+    $cpuIssues=@($issues|Where-Object {$_.MessageId -eq 24002})
+    $targets=@()
+    if($networkIssues.Count){
+        $targets=@(Get-VMSwitch -Name 'nat' -ErrorAction Stop)
+        if($targets.Count -ne 1 -or $targets[0].SwitchType.ToString() -cne 'Internal'){throw 'Expected existing internal nat switch unavailable.'}
+    }
+    # These sources belong to the unregistered planned recovery copy. The
+    # published encrypted backup and every virtual hard disk remain intact.
+    foreach($issue in $cpuIssues){Remove-VMSavedState -VMSnapshot $issue.Source -Confirm:$false -ErrorAction Stop|Out-Null}
+    foreach($issue in $networkIssues){Connect-VMNetworkAdapter -VMNetworkAdapter $issue.Source -SwitchName $targets[0].Name -ErrorAction Stop|Out-Null}
     $resolved=Compare-VM -CompatibilityReport $Report -ErrorAction Stop
     if(@($resolved.Incompatibilities|Where-Object {$_}).Count -or -not $resolved.VM -or
        $resolved.VM.Id -ne $ExpectedVmId -or $resolved.VM.Name -cne $ExpectedName -or [string]$resolved.VM.Version -cne $ExpectedVersion){
         throw 'Import remains incompatible after exact planned-adapter remapping.'
     }
-    Write-Host 'WINDOWS_STATE_PLANNED_NAT_ADAPTER_REMAP_VERIFIED=true'
+    Write-Host ('WINDOWS_STATE_PLANNED_IMPORT_CORRECTIONS_VERIFIED='+($networkIssues.Count+$cpuIssues.Count))
     $resolved
 }
 

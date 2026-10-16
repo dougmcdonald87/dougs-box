@@ -424,7 +424,18 @@ jobs:
           $sha=if($env:EXPECTED_WINDOWS_STATE_GENERATION -ceq $seed){'5f13bc6fa567fdcdea5342a7481cb679a4a8b5e9'}else{$env:EXPECTED_WINDOWS_STATE_SOURCE_SHA}
           if($sha -cnotmatch '^[0-9a-f]{40}$'){throw 'Interactive restore requires explicitly pinned producer SHA.'}
           . ./scripts/windows-state-roundtrip.ps1
-          $parts=@(Restore-WindowsStateRoundtrip -ExpectedGeneration $env:EXPECTED_WINDOWS_STATE_GENERATION -HoldForOperator -ExpectedSourceSha $sha)
+          try {
+            $parts=@(Restore-WindowsStateRoundtrip -ExpectedGeneration $env:EXPECTED_WINDOWS_STATE_GENERATION -HoldForOperator -ExpectedSourceSha $sha)
+          } catch {
+            $failure=$_
+            $diagnosticDir=Join-Path $env:ProgramData ('WindowsHomeRecovery/'+$env:GITHUB_RUN_ID)
+            New-Item -ItemType Directory -Path $diagnosticDir -Force|Out-Null
+            [ordered]@{schema=1;runId=$env:GITHUB_RUN_ID;generation=$env:EXPECTED_WINDOWS_STATE_GENERATION;sourceSha=$sha;message=$failure.Exception.Message;stack=$failure.ScriptStackTrace;utc=[DateTime]::UtcNow.ToString('o')}|ConvertTo-Json -Depth 5|Set-Content -LiteralPath (Join-Path $diagnosticDir 'failure.json') -Encoding utf8
+            Write-Host 'PILOT_RECOVERY_FAILURE_DIAGNOSTIC_HOLD_SECONDS=600'
+            Write-Host ('PILOT_RECOVERY_FAILURE_CLASS='+$failure.Exception.GetType().FullName)
+            Start-Sleep -Seconds 600
+            throw $failure
+          }
           $result=@($parts|Where-Object {$_ -is [pscustomobject] -and $_.freshHostRestored -eq $true}|Select-Object -First 1)
           if($result.Count -ne 1){throw 'Verified guest restore result missing or ambiguous.'}
           $vm=$result[0]
