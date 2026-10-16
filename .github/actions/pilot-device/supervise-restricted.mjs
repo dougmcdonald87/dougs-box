@@ -25,7 +25,7 @@ const delay=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const spawnTask=(exe,args,opts)=>spawn(exe,args,{windowsHide:true,...opts});
 async function stopTree(pid){
  if(!Number.isSafeInteger(pid)||pid<=0)return;
- const child=spawnTask('taskkill.exe',['/PID',String(pid),'/T','/F'],{stdio:'ignore'});
+ const child=spawnTask('taskkill.exe',['/PID',String(pid),'/T','/F'],{stdio:'ignore',timeout:10000});
  await new Promise(resolve=>{child.once('exit',resolve);child.once('error',resolve);});
 }
 // Losing an optional assistant terminal must not terminate the owner's RDP
@@ -35,6 +35,25 @@ export async function holdWithOptionalTerminal({hold,terminal,report}){
  const pairing=Promise.resolve().then(()=>terminal(controller.signal)).catch(()=>report());
  try{return await hold();}
  finally{controller.abort();await pairing;}
+}
+// Isolate potentially stalled network/artifact work in a killable first-party
+// subprocess, so owner Finish never waits for an SDK upload retry to return.
+export async function runPairingProcess(signal,{
+ args=[fileURLToPath(import.meta.url),'--pair-only'],stop=stopTree
+}={}){
+ const child=spawnTask(process.execPath,args,{stdio:['ignore','inherit','inherit'],env:process.env});
+ let cancel;
+ try {
+  await new Promise((resolve,reject)=>{
+   cancel=()=>{stop(child.pid).then(resolve,reject);};
+   child.once('error',reject);
+   child.once('exit',code=>{
+    if(signal.aborted||code===0)resolve();else reject(Error('Optional terminal subprocess failed'));
+   });
+   signal.addEventListener('abort',cancel,{once:true});
+   if(signal.aborted)cancel();
+  });
+ } finally {signal.removeEventListener('abort',cancel);}
 }
 async function pairRestrictedTerminal({signal}){
  if(process.env.GITHUB_ACTIONS!=='true'||process.env.DEVBOX_ISOLATED_TEST!=='1'||
@@ -99,12 +118,15 @@ export async function supervise(){
  const outcome=await holdWithOptionalTerminal({
   hold:()=>holdOperatorSession({controlDir:process.env.WINDOWS_HOME_CONTROL_DIR,
    workspace:process.env.GITHUB_WORKSPACE,runId:process.env.GITHUB_RUN_ID}),
-  terminal:signal=>pairRestrictedTerminal({signal}),
+  terminal:signal=>runPairingProcess(signal),
   report:()=>console.log('PILOT_OPTIONAL_TERMINAL_UNAVAILABLE_OWNER_HOLD_CONTINUES')
  });
  console.log(outcome.completedFinish?'PILOT_VERIFIED_FINISH_HOLD_COMPLETE':'PILOT_HOLD_EXPIRED_WITHOUT_VERIFIED_FINISH');
  console.log('PILOT_OWNER_REQUESTS_PROCESSED='+outcome.processed);
 }
 if(process.argv[1]&&fileURLToPath(import.meta.url)===process.argv[1]){
- try{await supervise();}catch(e){console.error('PILOT_RESTRICTED_PAIRING_FAILED='+e.name);process.exitCode=1;}
+ try{
+  if(process.argv.includes('--pair-only'))await pairRestrictedTerminal({signal:new AbortController().signal});
+  else await supervise();
+ }catch(e){console.error('PILOT_RESTRICTED_PAIRING_FAILED='+e.name);process.exitCode=1;}
 }

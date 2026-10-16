@@ -29,3 +29,16 @@ test('verified owner Finish stops the optional terminal',async()=>{
  });
  assert.equal(result.completedFinish,true);assert.equal(stopped,true);
 });
+
+test('owner Finish can kill terminal subprocess even while its artifact work is stalled',async()=>{
+ assert.equal(typeof supervisor.runPairingProcess,'function');
+ const controller=new AbortController();
+ let stopped=false;
+ const running=supervisor.runPairingProcess(controller.signal,{
+  args:['-e','setInterval(()=>{},1000)'],
+  stop:async pid=>{process.kill(pid);stopped=true;}
+ });
+ controller.abort();
+ await running;
+ assert.equal(stopped,true);
+});
