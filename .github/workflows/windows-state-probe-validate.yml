@@ -663,6 +663,15 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
           persist-credentials: false
+      - name: Prepare internal switch before expensive recovery
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $switches=@(Get-VMSwitch -Name 'nat' -ErrorAction SilentlyContinue)
+          if(-not $switches.Count){New-VMSwitch -Name 'nat' -SwitchType Internal -ErrorAction Stop|Out-Null}
+          $switches=@(Get-VMSwitch -Name 'nat' -ErrorAction Stop)
+          if($switches.Count -ne 1 -or $switches[0].SwitchType.ToString() -cne 'Internal'){throw 'Cold verification requires exact internal nat switch.'}
+          Write-Host 'COLD_INTERNAL_SWITCH_READY=true'
       - name: Verify real saved Windows C on fresh host without RDP or desktop tools
         shell: pwsh
         env:

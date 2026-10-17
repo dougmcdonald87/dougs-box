@@ -12,7 +12,7 @@ jobs:
     if: >-
       github.event_name == 'push' &&
       github.ref == 'refs/heads/pilot/windows-home-connection-20261015' &&
-      github.event.head_commit.message == 'test(pilot): retry cold C verification from complete tree'
+      github.event.head_commit.message == 'test(pilot): test real planned checkpoint memory removal'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -30,7 +30,7 @@ jobs:
           gh workflow run 'windows-state-probe-validate.yml' \
             --repo "$GH_REPO" \
             --ref 'pilot/windows-home-connection-20261015' \
-            --field transfer_phase=cold-restore-verification \
+            --field transfer_phase=native-compatibility \
             --field expected_generation=devbox-checkpoint-v1-ci-38930283997-1-20261016T200332Z-ae82c5cc06b2488787c87155d9134862 \
             --field expected_source_sha=21b49e1e87e93fb71b4ef8f736e459b5e86e530f
           echo 'PILOT_ONE_SHOT_RDP_PROBE_DISPATCH_ACCEPTED=true'
