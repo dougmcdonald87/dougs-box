@@ -28,21 +28,10 @@ if($snapshots.Count -ne 1 -or $snapshots[0].VMId -ne $id -or $snapshots[0].State
 Write-Host ('NATIVE_PLANNED_CHECKPOINT_BEFORE='+($snapshots[0]|Select-Object Id,VMId,Name,State|ConvertTo-Json -Compress))
 $memoryBefore=@(Get-ChildItem $root -Recurse -File -Filter *.vmrs|Select-Object FullName,Length)
 Write-Host ('NATIVE_MEMORY_FILES_BEFORE='+($memoryBefore|ConvertTo-Json -Compress))
-$settings=@(Get-CimInstance -Namespace root/virtualization/v2 -ClassName Msvm_VirtualSystemSettingData -ErrorAction Stop|Where-Object {$_.ConfigurationID -eq $snapshots[0].Id.ToString()})
-Write-Host ('NATIVE_SNAPSHOT_SETTINGS='+($settings|Select-Object InstanceID,ConfigurationID,VirtualSystemIdentifier,VirtualSystemType,IsSaved|ConvertTo-Json -Compress))
-if($settings.Count -ne 1 -or $settings[0].VirtualSystemIdentifier -ine $id.ToString() -or $settings[0].VirtualSystemType -cne 'Microsoft:Hyper-V:Snapshot:Planned'){throw 'Direct snapshot method ownership/type refused.'}
-$service=Get-CimInstance -Namespace root/virtualization/v2 -ClassName Msvm_VirtualSystemSnapshotService -ErrorAction Stop
-$clear=Invoke-CimMethod -InputObject $service -MethodName ClearSnapshotState -Arguments @{SnapshotSettingData=$settings[0]} -ErrorAction Stop
-Write-Host ('NATIVE_CLEAR_SNAPSHOT_RETURN='+$clear.ReturnValue)
-if($clear.ReturnValue -eq 4096){
-    $job=Get-CimInstance -InputObject $clear.Job -ErrorAction Stop
-    $deadline=[DateTime]::UtcNow.AddSeconds(60)
-    while($job.JobState -in @(2,3,4,5,6) -and [DateTime]::UtcNow -lt $deadline){Start-Sleep -Milliseconds 250;$job=Get-CimInstance -InputObject $job -ErrorAction Stop}
-    Write-Host ('NATIVE_CLEAR_SNAPSHOT_JOB='+($job|Select-Object JobState,ErrorCode,ErrorDescription|ConvertTo-Json -Compress))
-    if($job.JobState -ne 7 -or $job.ErrorCode -ne 0){throw 'Native snapshot state job failed.'}
-} elseif($clear.ReturnValue -ne 0){throw 'Native snapshot state method refused.'}
-$nativeAfter=Get-CimInstance -InputObject $settings[0] -ErrorAction Stop
-Write-Host ('NATIVE_SETTINGS_IMMEDIATELY_AFTER='+($nativeAfter|Select-Object ConfigurationID,VirtualSystemIdentifier,VirtualSystemType,IsSaved|ConvertTo-Json -Compress))
+. (Join-Path $PSScriptRoot '../scripts/windows-state-checkpoint.ps1')
+Clear-WindowsStatePlannedSnapshotSavedState -Snapshot $snapshots[0] -ExpectedVmId $id
+$settings=@(Get-CimInstance -Namespace root/virtualization/v2 -ClassName Msvm_VirtualSystemSettingData -Filter ("ConfigurationID='"+$snapshots[0].Id+"'") -ErrorAction Stop)
+$nativeAfter=$settings[0]
 $r=Compare-VM -CompatibilityReport $r -ErrorAction Stop
 $nativeCompared=Get-CimInstance -InputObject $settings[0] -ErrorAction Stop
 Write-Host ('NATIVE_SETTINGS_AFTER_COMPARE='+($nativeCompared|Select-Object ConfigurationID,VirtualSystemIdentifier,VirtualSystemType,IsSaved|ConvertTo-Json -Compress))

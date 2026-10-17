@@ -118,6 +118,31 @@ function Export-WindowsStateCheckpoint {
     }
 }
 
+function Clear-WindowsStatePlannedSnapshotSavedState {
+    param([Parameter(Mandatory)]$Snapshot,[Parameter(Mandatory)][guid]$ExpectedVmId)
+    $snapshotId=[guid]$Snapshot.Id
+    if($ExpectedVmId -eq [guid]::Empty -or $Snapshot.VMId -ne $ExpectedVmId -or $snapshotId -eq [guid]::Empty -or $snapshotId -eq $ExpectedVmId -or
+       $Snapshot.PSObject.TypeNames -notcontains 'Microsoft.HyperV.PowerShell.VMSnapshot'){throw 'Owned historical snapshot required.'}
+    if(Get-CimInstance -Namespace root/virtualization/v2 -ClassName Msvm_ComputerSystem -Filter ("Name='"+$ExpectedVmId+"'") -ErrorAction Stop){throw 'Registered VM saved-state correction refused.'}
+    $settings=@(Get-CimInstance -Namespace root/virtualization/v2 -ClassName Msvm_VirtualSystemSettingData -Filter ("ConfigurationID='"+$snapshotId+"'") -ErrorAction Stop)
+    if($settings.Count -ne 1 -or $settings[0].VirtualSystemIdentifier -ine $ExpectedVmId.ToString() -or
+       $settings[0].VirtualSystemType -cne 'Microsoft:Hyper-V:Snapshot:Planned' -or $settings[0].IsSaved -isnot [bool]){throw 'Native planned snapshot ownership/type mismatch.'}
+    if($settings[0].IsSaved -eq $false){return}
+    $services=@(Get-CimInstance -Namespace root/virtualization/v2 -ClassName Msvm_VirtualSystemSnapshotService -ErrorAction Stop)
+    if($services.Count -ne 1){throw 'Native snapshot service ambiguous.'}
+    $clear=Invoke-CimMethod -InputObject $services[0] -MethodName ClearSnapshotState -Arguments @{SnapshotSettingData=$settings[0]} -ErrorAction Stop
+    if($clear.ReturnValue -eq 4096){
+        $job=Get-CimInstance -InputObject $clear.Job -ErrorAction Stop
+        $deadline=[DateTime]::UtcNow.AddSeconds(60)
+        while($job.JobState -in @(2,3,4,5,6) -and [DateTime]::UtcNow -lt $deadline){Start-Sleep -Milliseconds 250;$job=Get-CimInstance -InputObject $job -ErrorAction Stop}
+        if($job.JobState -ne 7 -or $job.ErrorCode -ne 0){throw 'Native planned snapshot state-clear job failed.'}
+    } elseif($clear.ReturnValue -ne 0){throw 'Native planned snapshot state-clear method refused.'}
+    $actual=Get-CimInstance -InputObject $settings[0] -ErrorAction Stop
+    if($actual.ConfigurationID -ine $snapshotId.ToString() -or $actual.VirtualSystemIdentifier -ine $ExpectedVmId.ToString() -or
+       $actual.VirtualSystemType -cne 'Microsoft:Hyper-V:Snapshot:Planned' -or $actual.IsSaved -ne $false){throw 'Native planned snapshot saved-memory removal unverified.'}
+    Write-Host ('WINDOWS_STATE_PLANNED_SNAPSHOT_MEMORY_CLEARED='+$snapshotId)
+}
+
 function Resolve-WindowsStateImportCompatibility {
     param([Parameter(Mandatory)]$Report,[Parameter(Mandatory)][guid]$ExpectedVmId,[Parameter(Mandatory)][string]$ExpectedName,[Parameter(Mandatory)][string]$ExpectedVersion)
     if(-not $Report.VM -or $Report.VM.Id -ne $ExpectedVmId -or $Report.VM.Name -cne $ExpectedName -or [string]$Report.VM.Version -cne $ExpectedVersion){throw 'Import report identity/version mismatch; no network correction allowed.'}
@@ -153,7 +178,7 @@ function Resolve-WindowsStateImportCompatibility {
     }
     # These sources belong to the unregistered planned recovery copy. The
     # published encrypted backup and every virtual hard disk remain intact.
-    foreach($issue in $cpuIssues){Remove-VMSavedState -VMSnapshot $issue.Source -Confirm:$false -ErrorAction Stop|Out-Null}
+    foreach($issue in $cpuIssues){Clear-WindowsStatePlannedSnapshotSavedState -Snapshot $issue.Source -ExpectedVmId $ExpectedVmId}
     foreach($issue in $networkIssues){Connect-VMNetworkAdapter -VMNetworkAdapter $issue.Source -SwitchName $targets[0].Name -ErrorAction Stop|Out-Null}
     $resolved=Compare-VM -CompatibilityReport $Report -ErrorAction Stop
     if(@($resolved.Incompatibilities|Where-Object {$_}).Count -or -not $resolved.VM -or

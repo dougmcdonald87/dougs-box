@@ -19,7 +19,7 @@ function New-SnapshotIssue {
     [pscustomobject]@{MessageId=24002;Source=$snapshot;Message='Intel saved checkpoint on AMD host'}
 }
 function Get-VM {param($Id,$ErrorAction) $script:existingVm}
-function Remove-VMSavedState {param($VMSnapshot,$Confirm,$ErrorAction) $script:stateRemovals++;if($VMSnapshot.VMId -ne $id -or $VMSnapshot.Id -eq $id){throw 'Wrong checkpoint'};if($script:clearFails){throw 'Injected clear failure'}}
+function Clear-WindowsStatePlannedSnapshotSavedState {param($Snapshot,$ExpectedVmId) $VMSnapshot=$Snapshot; $script:stateRemovals++;if($VMSnapshot.VMId -ne $id -or $VMSnapshot.Id -eq $id){throw 'Wrong checkpoint'};if($script:clearFails){throw 'Injected clear failure'}}
 function Get-CimInstance {param($Namespace,$ClassName,$Filter,$ErrorAction) if($script:existingVm -and -not $script:plannedOnly){$script:existingVm}}
 function Get-VMSwitch {param($Name,$ErrorAction) if($script:missingSwitch){throw 'Missing target'};[pscustomobject]@{Name='nat';SwitchType=$script:switchType}}
 function Connect-VMNetworkAdapter {param($VMNetworkAdapter,$SwitchName,$ErrorAction) $script:connections++;if($SwitchName -cne 'nat'){throw 'Wrong target'}}

@@ -644,6 +644,11 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
           persist-credentials: false
+      - name: Check guarded import and native-memory failure cases
+        shell: pwsh
+        run: |
+          ./tests/windows-state-import-network.tests.ps1
+          ./tests/windows-state-planned-memory.tests.ps1
       - name: Reproduce native missing-switch source with disposable diskless VM
         shell: pwsh
         run: ./tests/windows-state-native-compatibility.ps1
@@ -663,6 +668,11 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
           persist-credentials: false
+      - name: Check guarded import and native-memory failure cases
+        shell: pwsh
+        run: |
+          ./tests/windows-state-import-network.tests.ps1
+          ./tests/windows-state-planned-memory.tests.ps1
       - name: Prepare internal switch before expensive recovery
         shell: pwsh
         run: |

@@ -12,7 +12,7 @@ jobs:
     if: >-
       github.event_name == 'push' &&
       github.ref == 'refs/heads/pilot/windows-home-connection-20261015' &&
-      github.event.head_commit.message == 'test(pilot): verify native IsSaved after checkpoint state clear'
+      github.event.head_commit.message == 'test(pilot): verify guarded production planned-memory helper'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
