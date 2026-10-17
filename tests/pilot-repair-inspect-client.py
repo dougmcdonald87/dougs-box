@@ -24,12 +24,15 @@ try{{&([scriptblock]::Create($r.ReadToEnd()))}}finally{{$r.Dispose();$g.Dispose(
 def run_private_script(session,command,password):
     """Only the encrypted transient shell environment carries the owner password."""
     import types
-    encoded=base64.b64encode(command.encode('utf-16-le')).decode()
-    if len(encoded)+100>30000:raise ValueError('Direct WinRS command exceeds native budget')
+    payload=command.encode('utf-8')
+    if len(payload)>65536:raise ValueError('Private stdin payload exceeds bounded envelope')
+    loader="$ErrorActionPreference='Stop';[Console]::InputEncoding=[Text.UTF8Encoding]::new($false);[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false);$s=[Console]::In.ReadToEnd();&([scriptblock]::Create($s))"
+    encoded=base64.b64encode(loader.encode('utf-16-le')).decode()
     shell=session.protocol.open_shell(env_vars={'PILOT_GUEST_OWNER_PASSWORD':password},codepage=65001)
     operation=None
     try:
-        operation=session.protocol.run_command(shell,'powershell.exe',['-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand',encoded],skip_cmd_shell=True)
+        operation=session.protocol.run_command(shell,'powershell.exe',['-NoLogo','-NoProfile','-NonInteractive','-EncodedCommand',encoded],skip_cmd_shell=True,console_mode_stdin=False)
+        session.protocol.send_command_input(shell,operation,payload,end=True)
         out,err,status=session.protocol.get_command_output(shell,operation)
         return types.SimpleNamespace(std_out=out,std_err=err,status_code=status)
     finally:
