@@ -43,13 +43,14 @@ try {
   [pscustomobject]@{authenticatedOwner=$identity;guiLoggedOnUser=[string](Get-CimInstance Win32_ComputerSystem).UserName;drives=$drives;links=$links;publicFields=@($public.PSObject.Properties.Name)}
  }
 } finally {if($guest){Remove-PSSession $guest};$password.Dispose()}
-$frame=$null
+$frame=$null;$frameInfo=$null
 try {
  $system=Get-CimInstance -Namespace root/virtualization/v2 -ClassName Msvm_ComputerSystem -Filter ("Name='"+$id+"'")
  $settings=@(Get-CimAssociatedInstance -InputObject $system -Association Msvm_SettingsDefineState -ResultClassName Msvm_VirtualSystemSettingData)
  if($settings.Count -ne 1){throw 'One realized guest setting required.'}
  $service=Get-CimInstance -Namespace root/virtualization/v2 -ClassName Msvm_VirtualSystemManagementService
  $image=Invoke-CimMethod -InputObject $service -MethodName GetVirtualSystemThumbnailImage -Arguments @{TargetSystem=$settings[0];WidthPixels=[uint16]640;HeightPixels=[uint16]480}
+ $frameInfo=@{returnValue=$image.ReturnValue;type=$image.ImageData.GetType().FullName;length=$image.ImageData.Length;count=@($image.ImageData).Count;requestedWidth=640;requestedHeight=480}
  if($image.ReturnValue -ne 0 -or $image.ImageData.Length -ne (640*480*2)){throw ('Thumbnail return/size refused: '+$image.ReturnValue)}
  Add-Type -AssemblyName System.Drawing
  $bitmap=[Drawing.Bitmap]::new(640,480,[Drawing.Imaging.PixelFormat]::Format16bppRgb565)
@@ -60,6 +61,8 @@ try {
   $bitmap.Save($memory,[Drawing.Imaging.ImageFormat]::Png)
   $frame=@{format='png';width=640;height=480;base64=[Convert]::ToBase64String($memory.ToArray())}
  } finally {$bitmap.Dispose();$memory.Dispose()}
-} catch {$frame=@{unavailable=$_.Exception.Message}}
-$workers=@(Get-CimInstance Win32_Process|Where-Object {$_.CommandLine -like '*windows-home-guest-bridge.ps1*' -or $_.CommandLine -like '*hold-operator.mjs*'}|Select-Object ProcessId,Name)
-[ordered]@{runId=$run;sourceSha=$sha;phase='guest-evidence';vmId=$id.ToString();vmState=[string]$vm.State;hostIp=$a.ip;hostAccount=$a.account;deadlineMs=$session.deadlineMs;inventory=$inventory;workers=$workers;frame=$frame}|ConvertTo-Json -Depth 8 -Compress
+} catch {$frame=@{unavailable=$_.Exception.Message;native=$frameInfo}}
+$workers=@(Get-CimInstance Win32_Process|Where-Object {$_.CommandLine -like '*windows-home-guest-bridge.ps1*' -or $_.CommandLine -like '*hold-operator.mjs*' -or $_.CommandLine -like '*supervise-restricted.mjs*'}|Select-Object ProcessId,Name)
+$bridgeErrors=@();$bridgeErrorPath=Join-Path $control 'bridge.stderr.log'
+if(Test-Path $bridgeErrorPath){$bridgeErrors=@(Get-Content -LiteralPath $bridgeErrorPath -Tail 16|Where-Object {$_ -notmatch '::add-mask::'})}
+[ordered]@{runId=$run;sourceSha=$sha;phase='guest-evidence';vmId=$id.ToString();vmState=[string]$vm.State;hostIp=$a.ip;hostAccount=$a.account;deadlineMs=$session.deadlineMs;inventory=$inventory;workers=$workers;bridgeErrors=$bridgeErrors;frame=$frame}|ConvertTo-Json -Depth 8 -Compress
