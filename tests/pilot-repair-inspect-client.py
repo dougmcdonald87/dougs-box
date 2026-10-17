@@ -5,18 +5,19 @@ import winrm
 from cryptography.hazmat.primitives.asymmetric import rsa,padding
 from cryptography.hazmat.primitives import hashes
 def make_inspection_command(run,sha,source):
-    import hashlib
+    import gzip
     if not re.fullmatch('[1-9][0-9]*',run) or not re.fullmatch('[0-9a-f]{40}',sha):raise ValueError('Pinned inspection target required')
-    digest=hashlib.sha256(source.replace('\r\n','\n').encode()).hexdigest()
-    return f'''$ErrorActionPreference='Stop'
-$a=Get-Content -LiteralPath 'C:\\ProgramData\\WindowsHomePilotRepair\\{run}\\access.json' -Raw|ConvertFrom-Json
-if($a.runId -cne '{run}' -or $a.sourceSha -cne '{sha}'){{throw 'Target mismatch'}}
-$s=Get-Content -LiteralPath (Join-Path $a.workspace 'scripts/windows-home-repair-inspect.ps1') -Raw
-$s=$s.Replace("`r`n","`n")
-$hash=[BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($s))).Replace('-','').ToLowerInvariant()
-if($hash -cne '{digest}'){{throw 'Read-only inspection source mismatch'}}
-&([scriptblock]::Create($s.Replace('__TARGET_RUN__','{run}').Replace('__TARGET_SHA__','{sha}')))
+    source=source.replace('\r\n','\n').replace('__TARGET_RUN__',run).replace('__TARGET_SHA__',sha)
+    packed=base64.b64encode(gzip.compress(source.encode(),mtime=0)).decode()
+    command=f'''$ErrorActionPreference='Stop'
+$b=[Convert]::FromBase64String('{packed}')
+$m=New-Object IO.MemoryStream(,$b)
+$g=New-Object IO.Compression.GZipStream($m,[IO.Compression.CompressionMode]::Decompress)
+$r=New-Object IO.StreamReader($g,[Text.Encoding]::UTF8)
+try{{&([scriptblock]::Create($r.ReadToEnd()))}}finally{{$r.Dispose();$g.Dispose();$m.Dispose()}}
 '''
+    if len('powershell -EncodedCommand ')+len(base64.b64encode(command.encode('utf-16-le')))>8000:raise ValueError('Inspection command exceeds native budget')
+    return command
 
 run=os.environ.get('PILOT_TARGET_RUN_ID','');sha=os.environ.get('PILOT_TARGET_SHA','')
 if not re.fullmatch('[1-9][0-9]*',run) or not re.fullmatch('[0-9a-f]{40}',sha):raise SystemExit('Pinned pilot target required')
