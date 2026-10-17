@@ -1,4 +1,4 @@
-# Owner command from authenticated HOST RDP session; no cloud credentials.
+# Owner command on the host or inside the Home guest; no cloud credentials.
 [CmdletBinding()]
 param([Parameter(Mandatory)][ValidateSet('Save','Finish')][string]$Operation,
       [Parameter(Mandatory)][string]$ControlDir,
@@ -21,6 +21,7 @@ $dest=Join-Path $root ('request-'+$id+'.json')
 [IO.File]::WriteAllText($temp,($request|ConvertTo-Json -Compress),[Text.UTF8Encoding]::new($false))
 [IO.File]::Move($temp,$dest)
 Write-Host ('Submitted '+$Operation+' request '+$id+'; submission does NOT prove persistence.')
+if($Operation -ceq 'Finish'){Write-Host 'Finish closes Windows after backup verification. Final confirmation is recorded on the host after Windows is off.'}
 $response=Join-Path (Join-Path $ControlDir 'responses') ('response-'+$id+'.json')
 $waitUntil=[DateTime]::UtcNow.AddSeconds($WaitSeconds)
 $verified=$false

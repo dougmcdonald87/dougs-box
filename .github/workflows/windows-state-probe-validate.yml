@@ -338,11 +338,12 @@ jobs:
           PYTHON
 
   restore-hold:
-    if: github.event_name == 'workflow_dispatch' && inputs.transfer_phase == 'restore-hold'
+    if: github.event_name == 'workflow_dispatch' && inputs.transfer_phase == 'restore-hold' && github.ref == 'refs/heads/pilot/windows-home-connection-20261015'
     runs-on: windows-2025-vs2026
     environment: devbox
     timeout-minutes: 340
     permissions:
+      actions: read
       contents: write # only this manual pilot job can publish a new immutable CI checkpoint
       id-token: write # only the dedicated, workflow-pinned pilot tailnet identity
     env:
@@ -352,6 +353,19 @@ jobs:
       EXPECTED_WINDOWS_STATE_GENERATION: ${{ inputs.expected_generation }}
       EXPECTED_WINDOWS_STATE_SOURCE_SHA: ${{ inputs.expected_source_sha }}
     steps:
+      - name: Anchor publication budget to actual workflow start
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $raw=& gh api ('repos/'+$env:GITHUB_REPOSITORY+'/actions/runs/'+$env:GITHUB_RUN_ID)
+          if($LASTEXITCODE -ne 0){throw 'Actual workflow start unavailable.'}
+          $run=($raw -join "`n")|ConvertFrom-Json
+          if($run.head_sha -cne $env:GITHUB_SHA -or $run.event -cne 'workflow_dispatch'){throw 'Workflow budget identity mismatch.'}
+          $stop=([DateTimeOffset]::Parse($run.run_started_at)).AddMinutes(325).ToUnixTimeMilliseconds()
+          if($stop -le ([DateTimeOffset]::UtcNow.AddMinutes(45).ToUnixTimeMilliseconds())){throw 'Insufficient remaining workflow budget.'}
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value ('WINDOWS_HOME_HOST_STOP_MS='+$stop)
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
           persist-credentials: false
@@ -410,6 +424,23 @@ jobs:
           if($LASTEXITCODE -ne 0){throw 'Pilot SID-based control directory ACL regression test failed; guest restore forbidden.'}
           python ./tests/windows-home-guest-owner.tests.py
           if($LASTEXITCODE -ne 0){throw 'Guest owner account security/sequence tests failed before restore.'}
+      - name: Establish independently authenticated repair access before expensive restore
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          foreach($test in @('./tests/windows-home-session-budget.tests.ps1','./tests/windows-home-repair-access.tests.ps1','./tests/windows-state-repair-retention.tests.ps1','./tests/windows-state-repair-resume.tests.ps1','./tests/windows-home-guest-transport.tests.ps1','./tests/windows-home-guest-receipts.tests.ps1','./tests/windows-home-guest-batch.tests.ps1')){
+            & pwsh -NoProfile -File $test
+            if($LASTEXITCODE -ne 0){throw ('Repair guard failed: '+$test)}
+          }
+          ./scripts/windows-home-repair-access.ps1
+      - name: Prepare internal switch before interactive recovery
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $switches=@(Get-VMSwitch -Name 'nat' -ErrorAction SilentlyContinue)
+          if(-not $switches.Count){New-VMSwitch -Name 'nat' -SwitchType Internal -ErrorAction Stop|Out-Null}
+          $switches=@(Get-VMSwitch -Name 'nat' -ErrorAction Stop)
+          if($switches.Count -ne 1 -or $switches[0].SwitchType.ToString() -cne 'Internal'){throw 'Interactive recovery requires exact internal nat switch.'}
       - name: Restore, boot and verify isolated Windows 10 Home guest without deleting verified VM
         id: restore_guest
         shell: pwsh
@@ -426,17 +457,7 @@ jobs:
           if($sha -cnotmatch '^[0-9a-f]{40}$'){throw 'Interactive restore requires explicitly pinned producer SHA.'}
           . ./scripts/windows-state-roundtrip.ps1
           try {
-            $parts=@(Restore-WindowsStateRoundtrip -ExpectedGeneration $env:EXPECTED_WINDOWS_STATE_GENERATION -HoldForOperator -ExpectedSourceSha $sha)
-          } catch {
-            $failure=$_
-            $diagnosticDir=Join-Path $env:ProgramData ('WindowsHomeRecovery/'+$env:GITHUB_RUN_ID)
-            New-Item -ItemType Directory -Path $diagnosticDir -Force|Out-Null
-            [ordered]@{schema=1;runId=$env:GITHUB_RUN_ID;generation=$env:EXPECTED_WINDOWS_STATE_GENERATION;sourceSha=$sha;message=$failure.Exception.Message;stack=$failure.ScriptStackTrace;utc=[DateTime]::UtcNow.ToString('o')}|ConvertTo-Json -Depth 5|Set-Content -LiteralPath (Join-Path $diagnosticDir 'failure.json') -Encoding utf8
-            Write-Host 'PILOT_RECOVERY_FAILURE_DIAGNOSTIC_HOLD_SECONDS=600'
-            Write-Host ('PILOT_RECOVERY_FAILURE_CLASS='+$failure.Exception.GetType().FullName)
-            Start-Sleep -Seconds 600
-            throw $failure
-          }
+            $parts=@(Restore-WindowsStateRoundtrip -ExpectedGeneration $env:EXPECTED_WINDOWS_STATE_GENERATION -HoldForOperator -ExpectedSourceSha $sha -KeepForRepair)
           $result=@(Get-WindowsStateFreshRestoreReceipt -Parts $parts)
           if($result.Count -ne 1){throw 'Verified guest restore result missing or ambiguous.'}
           $vm=$result[0]
@@ -445,6 +466,41 @@ jobs:
           $controlDir=Join-Path $env:ProgramData ('WindowsHomePilot\'+$env:GITHUB_RUN_ID)
           Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value ('control_dir='+$controlDir)
           Write-Output ('ISOLATED_VERIFIED_WINDOWS_HOME_VM='+$vm.vmId)
+          } catch {
+            $failure=$_
+            $diagnosticDir=Join-Path $env:ProgramData ('WindowsHomeRecovery/'+$env:GITHUB_RUN_ID)
+            New-Item -ItemType Directory -Path $diagnosticDir -Force|Out-Null
+            [ordered]@{schema=1;runId=$env:GITHUB_RUN_ID;generation=$env:EXPECTED_WINDOWS_STATE_GENERATION;sourceSha=$sha;message=$failure.Exception.Message;stack=$failure.ScriptStackTrace;utc=[DateTime]::UtcNow.ToString('o')}|ConvertTo-Json -Depth 5|Set-Content -LiteralPath (Join-Path $diagnosticDir 'failure.json') -Encoding utf8
+            Write-Host 'PILOT_RECOVERY_FAILURE_DIAGNOSTIC_HOLD_SECONDS=7200'
+            Write-Host ('PILOT_RECOVERY_FAILURE_CLASS='+$failure.Exception.GetType().FullName)
+            $holdUntil=[DateTime]::UtcNow.AddMinutes(120)
+            $resumeRequest=Join-Path $env:ProgramData ('WindowsHomePilotRepair/'+$env:GITHUB_RUN_ID+'/resume.json')
+            $repaired=$false
+            while([DateTime]::UtcNow -lt $holdUntil){
+              if(Test-Path -LiteralPath $resumeRequest){
+                $claim=$resumeRequest+'.working-'+[guid]::NewGuid().ToString('N')
+                try {
+                  Move-Item -LiteralPath $resumeRequest -Destination $claim -ErrorAction Stop
+                  $requestFile=Get-Item -LiteralPath $claim -Force
+                  if($requestFile.PSIsContainer -or ($requestFile.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $requestFile.Length -gt 4096){throw 'Unsafe resume request file refused.'}
+                  $request=Get-Content -LiteralPath $claim -Raw|ConvertFrom-Json
+                  if($request.schema -ne 1 -or $request.runId -cne $env:GITHUB_RUN_ID -or $request.operation -cne 'Resume' -or $request.generation -cne $env:EXPECTED_WINDOWS_STATE_GENERATION -or $request.sourceSha -cne $sha){throw 'Retained repair resume request refused.'}
+                  $parts=@(Resume-WindowsStateRecovery -ExpectedGeneration $env:EXPECTED_WINDOWS_STATE_GENERATION -ExpectedSourceSha $sha)
+                  $vm=Get-WindowsStateFreshRestoreReceipt -Parts $parts
+                  ./scripts/windows-home-owner-account.ps1 -VmId ([guid]$vm.vmId) -Root $vm.root -OriginGeneration $vm.originGeneration
+                  ./scripts/windows-home-console.ps1 -Root $vm.root -VmId ([guid]$vm.vmId) -ExpectedGeneration $vm.generation -OriginGeneration $vm.originGeneration
+                  $controlDir=Join-Path $env:ProgramData ('WindowsHomePilot/'+$env:GITHUB_RUN_ID)
+                  Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value ('control_dir='+$controlDir)
+                  $repaired=$true;break
+                } catch {
+                  [ordered]@{schema=1;runId=$env:GITHUB_RUN_ID;message=$_.Exception.Message;stack=$_.ScriptStackTrace;utc=[DateTime]::UtcNow.ToString('o')}|ConvertTo-Json -Depth 5|Set-Content -LiteralPath (Join-Path $diagnosticDir 'resume-failure.json') -Encoding utf8
+                  Write-Host 'PILOT_REPAIR_RESUME_FAILED_HOST_RETAINED=true'
+                }
+              }
+              Start-Sleep -Seconds 5
+            }
+            if(-not $repaired){throw $failure}
+          }
       - name: Prepare artifact SDK for same-runner restricted terminal pairing
         shell: pwsh
         run: |
@@ -747,3 +803,37 @@ jobs:
       - name: Test actual Save and Finish requests, publications and VM states
         shell: pwsh
         run: ./tests/windows-state-operator.native.ps1
+
+  repair-access-client:
+    if: github.event_name == 'workflow_dispatch' && inputs.transfer_phase == 'restore-hold' && github.ref == 'refs/heads/pilot/windows-home-connection-20261015'
+    runs-on: ubuntu-latest
+    environment: devbox
+    timeout-minutes: 12
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - name: Verify dedicated pilot identity
+        shell: pwsh
+        env:
+          DEVBOX_ISOLATED_TEST: '1'
+        run: ./scripts/windows-home-tailnet-oidc.ps1 -ClientId 'Tf3m25iN2121CNTRL-k9nitZxGTS11CNTRL'
+      - name: Join independent repair client to pilot tailnet
+        uses: tailscale/github-action@d1b6cd204f8dceda5b3eaad7f1f767be390056cd
+        with:
+          oauth-client-id: 'Tf3m25iN2121CNTRL-k9nitZxGTS11CNTRL'
+          audience: 'api.tailscale.com/Tf3m25iN2121CNTRL-k9nitZxGTS11CNTRL'
+          tags: tag:windows-home-pilot
+          hostname: windows-home-repair-client-${{ github.run_id }}
+      - name: Prove existing owner WinRM authentication before guest recovery
+        shell: bash
+        env:
+          PILOT_OWNER_PASSWORD: ${{ secrets.DEVBOX_RDP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          python3 -m venv "$RUNNER_TEMP/pilot-repair-client"
+          "$RUNNER_TEMP/pilot-repair-client/bin/python" -m pip install --disable-pip-version-check --quiet pywinrm==0.5.0
+          "$RUNNER_TEMP/pilot-repair-client/bin/python" tests/pilot-repair-access-client.py

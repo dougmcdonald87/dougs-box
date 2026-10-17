@@ -123,8 +123,9 @@ function Assert-WindowsStateLiveProducer {
 }
 
 function Restore-WindowsStateRoundtrip {
-    param([Parameter(Mandatory)][string]$ExpectedGeneration,[switch]$HoldForOperator,[string]$ExpectedSourceSha='',[switch]$VerifyLiveSave,[switch]$ProbeGuestNetwork)
+    param([Parameter(Mandatory)][string]$ExpectedGeneration,[switch]$HoldForOperator,[string]$ExpectedSourceSha='',[switch]$VerifyLiveSave,[switch]$ProbeGuestNetwork,[switch]$KeepForRepair)
     if($ExpectedGeneration -cnotmatch '^devbox-checkpoint-v1-ci-([1-9][0-9]*)-([1-9][0-9]*)-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{32}$'){throw 'Only an exact isolated CI generation can be restored.'}
+    if($KeepForRepair -and (-not $HoldForOperator -or $env:GITHUB_REF -cne 'refs/heads/pilot/windows-home-connection-20261015' -or $env:GITHUB_REPOSITORY -cne 'dougmcdonald87/dougs-box')){throw 'Repair retention requires the isolated interactive pilot.'}
     if($ProbeGuestNetwork -and (-not $VerifyLiveSave -or $HoldForOperator)){throw 'Network probe only on a disposable live-Save verification consumer.'}
     $producerRun=$Matches[1];$producerAttempt=$Matches[2]
     if(($HoldForOperator -or $VerifyLiveSave) -and $ExpectedSourceSha -cnotmatch '^[0-9a-f]{40}$'){throw 'Pilot hold requires pinned producer source SHA.'}
@@ -185,6 +186,47 @@ function Restore-WindowsStateRoundtrip {
     $directory=Join-Path $root ('checkpoints/'+$record.generation)
     Move-Item -LiteralPath $originalDirectory -Destination $directory -ErrorAction Stop
     @{schema=1;root=$root;name=$name;vmId=$id.ToString();status='created'}|ConvertTo-Json|Set-Content -LiteralPath (Join-Path $root 'probe-owner.json') -Encoding utf8
+    $repairDir=Join-Path $env:ProgramData ('WindowsHomePilotRepair/'+$env:GITHUB_RUN_ID)
+    if($KeepForRepair){
+        if(-not(Test-Path -LiteralPath $repairDir)){throw 'Authenticated repair session metadata directory missing.'}
+        [ordered]@{schema=1;runId=$env:GITHUB_RUN_ID;sourceSha=$sourceSha;expectedGeneration=$ExpectedGeneration;consumerHost=$outerId;record=$record}|ConvertTo-Json -Depth 10|Set-Content -LiteralPath (Join-Path $repairDir 'recovery.json') -Encoding utf8
+    }
+    Invoke-WindowsStateRecoveredGuest -Record $record -ExpectedGeneration $ExpectedGeneration -ConsumerHost $outerId -HoldForOperator:$HoldForOperator -KeepForRepair:$KeepForRepair -ProbeGuestNetwork:$ProbeGuestNetwork -VerifyActiveSave:$activeSave
+}
+
+
+# Native restore also emits setup/Hyper-V objects; strict callers must select by shape.
+function Get-WindowsStateFreshRestoreReceipt {
+    [CmdletBinding()]
+    param([AllowEmptyCollection()][AllowNull()][object[]]$Parts)
+    $receipts=@($Parts|Where-Object {
+        $_ -is [pscustomobject] -and
+        $null -ne $_.PSObject.Properties['freshHostRestored'] -and
+        $_.freshHostRestored -is [bool] -and $_.freshHostRestored -eq $true
+    })
+    if($receipts.Count -ne 1){throw 'Exactly one verified fresh-host restore receipt is required.'}
+    $receipts[0]
+}
+
+# Failure retention is opt-in and never a success receipt. Cleanup remains default.
+function Complete-WindowsStateRestoreLifecycle {
+    param([string]$Root,[string]$VmName,[bool]$HoldVerified,[bool]$HoldForOperator,[bool]$KeepForRepair,[guid]$VmId=[guid]::Empty)
+    if($KeepForRepair){
+        if(-not $HoldForOperator -or $env:GITHUB_ACTIONS -cne 'true' -or $env:DEVBOX_ISOLATED_TEST -cne '1' -or
+           $env:GITHUB_EVENT_NAME -cne 'workflow_dispatch' -or $env:GITHUB_REPOSITORY -cne 'dougmcdonald87/dougs-box' -or
+           $env:GITHUB_REF -cne 'refs/heads/pilot/windows-home-connection-20261015'){throw 'Repair retention requires the isolated interactive pilot.'}
+        if(-not $HoldVerified){Write-Output ('ISOLATED_FAILED_GUEST_PRESERVED_FOR_REPAIR='+$VmName);return}
+    }
+    if($HoldForOperator -and $HoldVerified){Write-Output ('ISOLATED_VERIFIED_GUEST_HELD='+$VmName);return}
+    if($VmId -ne [guid]::Empty){$vm=Get-VM -Id $VmId -ErrorAction SilentlyContinue}else{$vm=Get-VM -Name $VmName -ErrorAction SilentlyContinue}
+    if($vm){Remove-WindowsStateProbe -Root $Root -VmName $VmName}
+}
+
+# Native import/boot/fixture phase shared by first recovery and retained-payload resume.
+function Invoke-WindowsStateRecoveredGuest {
+    param($Record,[string]$ExpectedGeneration,[string]$ConsumerHost,[switch]$HoldForOperator,[switch]$KeepForRepair,[switch]$ProbeGuestNetwork,[switch]$VerifyActiveSave)
+    $root=$Record.root;$name=$Record.vm_name;$id=[guid]$Record.vm_id;$record=$Record
+    $directory=Join-Path $root ('checkpoints/'+$record.generation)
     $holdVerified=$false;$networkProof=$null
     try {
         $vm=Import-WindowsStateCheckpoint -Root $root -VmId $id -ExportPath (Join-Path $directory 'payload') -ManifestPath (Join-Path $directory 'manifest.json')
@@ -203,29 +245,43 @@ function Restore-WindowsStateRoundtrip {
             $networkProof=Test-WindowsHomeGuestNetwork -VmId $id -Credential $credential
             if($networkProof.verified -ne $true){throw ('Disposable guest network probe refused at '+$networkProof.stage)}
         }
-        if($activeSave){Assert-WindowsStateLiveProducer -ProducerRun $producerRun -ProducerAttempt $producerAttempt -SourceSha $sourceSha}
+        if($VerifyActiveSave){Assert-WindowsStateLiveProducer -ProducerRun $record.producer_run -ProducerAttempt $record.producer_attempt -SourceSha $record.source_sha}
         $holdVerified=$true
         $originGeneration=if($record.PSObject.Properties.Name -contains 'origin_generation'){[string]$record.origin_generation}else{$ExpectedGeneration}
-        [pscustomobject]@{root=$root;vmName=$name;originGeneration=$originGeneration;generation=$ExpectedGeneration;vmId=$id.ToString();producerHost=$record.producer_host;consumerHost=$outerId;sourceRun=$record.producer_run;consumerRun=$env:GITHUB_RUN_ID;boot=$true;program=$actual.programVersion;documentSha256=$actual.documentSha256;preferences=$actual.preferences;windowsHideFileExt=$actual.windowsHideFileExt;machineGuid=$actual.machineGuid;freshHostRestored=$true;guestNetworkProbe=$networkProof}
+        [pscustomobject]@{root=$root;vmName=$name;originGeneration=$originGeneration;generation=$ExpectedGeneration;vmId=$id.ToString();producerHost=$record.producer_host;consumerHost=$ConsumerHost;sourceRun=$record.producer_run;consumerRun=$env:GITHUB_RUN_ID;boot=$true;program=$actual.programVersion;documentSha256=$actual.documentSha256;preferences=$actual.preferences;windowsHideFileExt=$actual.windowsHideFileExt;machineGuid=$actual.machineGuid;freshHostRestored=$true;guestNetworkProbe=$networkProof}
     } finally {
-        if(-not $HoldForOperator -or -not $holdVerified){
-            if(Get-VM -Id $id -ErrorAction SilentlyContinue){Remove-WindowsStateProbe -Root $root -VmName $name}
-        } else {
-            Write-Output ('ISOLATED_VERIFIED_GUEST_HELD='+$name)
-        }
+        Complete-WindowsStateRestoreLifecycle -Root $root -VmName $name -VmId $id -HoldVerified $holdVerified -HoldForOperator ([bool]$HoldForOperator) -KeepForRepair ([bool]$KeepForRepair)
     }
 }
 
-
-# Native restore also emits setup/Hyper-V objects; strict callers must select by shape.
-function Get-WindowsStateFreshRestoreReceipt {
+function Resume-WindowsStateRecovery {
     [CmdletBinding()]
-    param([AllowEmptyCollection()][AllowNull()][object[]]$Parts)
-    $receipts=@($Parts|Where-Object {
-        $_ -is [pscustomobject] -and
-        $null -ne $_.PSObject.Properties['freshHostRestored'] -and
-        $_.freshHostRestored -is [bool] -and $_.freshHostRestored -eq $true
-    })
-    if($receipts.Count -ne 1){throw 'Exactly one verified fresh-host restore receipt is required.'}
-    $receipts[0]
+    param([Parameter(Mandatory)][string]$ExpectedGeneration,[Parameter(Mandatory)][string]$ExpectedSourceSha)
+    Assert-WindowsStateRoundtripContext
+    if($env:GITHUB_REPOSITORY -cne 'dougmcdonald87/dougs-box' -or $env:GITHUB_REF -cne 'refs/heads/pilot/windows-home-connection-20261015' -or
+       $env:GITHUB_RUN_ID -cnotmatch '^[1-9][0-9]*$' -or $ExpectedSourceSha -cnotmatch '^[0-9a-f]{40}$' -or
+       $ExpectedGeneration -cnotmatch '^devbox-checkpoint-v1-ci-[1-9][0-9]*-[1-9][0-9]*-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{32}$'){throw 'Retained recovery requires exact current pilot context.'}
+    $path=Join-Path $env:ProgramData ('WindowsHomePilotRepair/'+$env:GITHUB_RUN_ID+'/recovery.json')
+    $file=Get-Item -LiteralPath $path -ErrorAction Stop
+    if($file.Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Retained recovery record link refused.'}
+    $state=Get-Content -LiteralPath $path -Raw|ConvertFrom-Json
+    $hostId=([guid](Get-CimInstance Win32_ComputerSystemProduct -ErrorAction Stop).UUID).ToString()
+    if($state.schema -ne 1 -or $state.runId -cne $env:GITHUB_RUN_ID -or $state.expectedGeneration -cne $ExpectedGeneration -or $state.sourceSha -cne $ExpectedSourceSha -or $state.consumerHost -cne $hostId){throw 'Retained recovery identity/source/host mismatch.'}
+    $record=$state.record;$id=[guid]$record.vm_id
+    if(Get-CimInstance -Namespace root/virtualization/v2 -ClassName Msvm_ComputerSystem -Filter ("Name='"+$id.ToString()+"'") -ErrorAction Stop){throw 'Retained recovery refuses an already registered guest; inspect it instead.'}
+    $owner=Get-WindowsStateCheckpointOwner -Root $record.root -VmId $id -AllowMissingVm
+    if($record.vm_name -cne $owner.name -or $record.generation -cnotmatch '^(save|finish)-[0-9a-f]{32}$'){throw 'Retained recovery layout identity mismatch.'}
+    # Release only an unregistered planned copy; preserve all prior mutable files.
+    if($owner.vm){Remove-VM -VM $owner.vm -Force -ErrorAction Stop}
+    $retained=Join-Path $owner.root ('repair-retained-'+[guid]::NewGuid().ToString('N'))
+    foreach($leaf in @($record.vm_name,'restored-disks','restored-snapshots')){
+        $mutable=Assert-WindowsStateOwnedPath -Root $owner.root -Path (Join-Path $owner.root $leaf)
+        if(Test-Path -LiteralPath $mutable){
+            if(Get-CimInstance -Namespace root/virtualization/v2 -ClassName Msvm_ComputerSystem -Filter ("Name='"+$id.ToString()+"'") -ErrorAction Stop){throw 'Guest registered while preparing retained recovery; refused.'}
+            if(-not(Test-Path -LiteralPath $retained)){New-Item -ItemType Directory -Path $retained -ErrorAction Stop|Out-Null}
+            Move-Item -LiteralPath $mutable -Destination (Join-Path $retained $leaf) -ErrorAction Stop
+        }
+    }
+    # Import rechecks every original manifest file/VHD relationship before creating a copy.
+    Invoke-WindowsStateRecoveredGuest -Record $record -ExpectedGeneration $ExpectedGeneration -ConsumerHost $hostId -HoldForOperator -KeepForRepair
 }

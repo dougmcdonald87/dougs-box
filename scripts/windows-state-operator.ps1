@@ -22,6 +22,11 @@ if($info.schema -ne 1 -or $info.runId -cne $env:GITHUB_RUN_ID -or $info.vmId -cn
    $info.generation -cnotmatch '^devbox-checkpoint-v1-ci-' -or
    $info.originGeneration -cnotmatch '^devbox-checkpoint-v1-ci-' -or
    $info.deadlineMs -le [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()){throw 'Invalid or expired interactive owner context.'}
+if($env:WINDOWS_HOME_HOST_STOP_MS){
+ . (Join-Path $PSScriptRoot 'windows-home-session-budget.ps1')
+ $cutoff=Get-WindowsHomeAdmissionDeadline -NowMs ([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()) -HostStopMs ([long]$env:WINDOWS_HOME_HOST_STOP_MS)
+ if([long]$info.deadlineMs -gt $cutoff){throw 'Owner session exceeds the verified host publication budget.'}
+}
 $vmId=[guid]::Parse([string]$info.vmId)
 . (Join-Path $PSScriptRoot 'windows-state-checkpoint.ps1')
 . (Join-Path $PSScriptRoot 'windows-state-roundtrip.ps1')
