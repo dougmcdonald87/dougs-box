@@ -21,7 +21,7 @@ if($config.Count -ne 1){throw 'Export config ambiguous.'}
 $r=Compare-VM -Path $config[0].FullName -Copy -VirtualMachinePath (Join-Path $root 'destination') -ErrorAction Stop
 $diagnostic=[ordered]@{vmId=[string]$r.VM.Id;version=[string]$r.VM.Version;issues=@($r.Incompatibilities|ForEach-Object {$s=$_.Source;[ordered]@{messageId=$_.MessageId;message=$_.Message;sourceType=$s.GetType().FullName;typeNames=@($s.PSObject.TypeNames);properties=@($s.PSObject.Properties|Where-Object {$_.Name -match 'Id|Name|Switch'}|ForEach-Object {@{name=$_.Name;value=[string]$_.Value}})}})}
 Write-Host ('NATIVE_COMPATIBILITY_SOURCE='+($diagnostic|ConvertTo-Json -Depth 8 -Compress))
-if(@($r.Incompatibilities|Where-Object {$_.MessageId -eq 33012}).Count -ne 1){throw 'Missing-switch native condition not reproduced.'}
+if(@($r.Incompatibilities|Where-Object {$_.MessageId -eq 33012}).Count -ne 2){throw 'Missing-switch native condition not reproduced.'}
 Write-Host 'NATIVE_MISSING_SWITCH_REPRODUCED=true'
 $snapshots=@(Get-VMSnapshot -VM $r.VM -ErrorAction Stop|Where-Object {$_.Name -ceq 'OwnedSavedMemoryProbe'})
 if($snapshots.Count -ne 1 -or $snapshots[0].VMId -ne $id -or $snapshots[0].State.ToString() -cne 'Saved'){throw 'Native planned saved-memory condition not reproduced.'}
