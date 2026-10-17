@@ -12,7 +12,7 @@ jobs:
     if: >-
       github.event_name == 'push' &&
       github.ref == 'refs/heads/pilot/windows-home-connection-20261015' &&
-      github.event.head_commit.message == 'fix(pilot): accept exact native network mask for retained repair'
+      github.event.head_commit.message == 'fix(pilot): gate repair login on native owner readiness'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:

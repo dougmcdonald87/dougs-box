@@ -1,6 +1,6 @@
 # Built-in authenticated WinRM for the disposable pilot only. No remote agent install.
 [CmdletBinding()]
-param()
+param([switch]$ConfigureOnly,[switch]$WaitForClient) 
 Set-StrictMode -Version Latest;$ErrorActionPreference='Stop'
 function Get-WindowsHomeRepairAccessPolicy {
  param([Parameter(Mandatory)][string]$PilotIp)
@@ -21,12 +21,33 @@ function Test-WindowsHomeRepairFirewallScope {
   $Ports.Protocol.ToString() -cin @('TCP','6')
 }
 if($env:GITHUB_ACTIONS -cne 'true' -or $env:DEVBOX_ISOLATED_TEST -cne '1' -or $env:GITHUB_EVENT_NAME -cne 'workflow_dispatch' -or $env:GITHUB_REPOSITORY -cne 'dougmcdonald87/dougs-box' -or $env:GITHUB_REF -cne 'refs/heads/pilot/windows-home-connection-20261015'){throw 'Repair access is restricted to the isolated manual pilot.'}
+if($ConfigureOnly -and $WaitForClient){throw 'Choose configure or wait, not both.'}
+if(-not $WaitForClient){
 $ips=@(& tailscale ip -4)
 if($LASTEXITCODE -ne 0 -or $ips.Count -ne 1){throw 'Exactly one connected pilot tailnet address required.'}
 $policy=Get-WindowsHomeRepairAccessPolicy -PilotIp $ips[0]
 $receipt=Join-Path (Join-Path $env:RUNNER_TEMP 'windows-home-restore-hold-rdp') 'rdp-state.txt'
 $match=[regex]::Match((Get-Content -LiteralPath $receipt -Raw).Trim(),'^rdpAccounts=(runneradmin|devbox)$')
 if(-not $match.Success -or -not (Get-LocalUser -Name $match.Groups[1].Value -ErrorAction Stop).Enabled){throw 'Existing owner account receipt required for repair access.'}
+# Validate the configured credential locally once, before external attempts.
+if([string]::IsNullOrEmpty($env:PILOT_OWNER_PASSWORD)){throw 'Existing owner credential unavailable for native authentication diagnostic.'}
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class PilotNativeLogon {
+ [DllImport("advapi32.dll", EntryPoint="LogonUserW", CharSet=CharSet.Unicode, SetLastError=true)]
+ public static extern bool Logon(string user,string domain,string password,int type,int provider,out IntPtr token);
+ [DllImport("kernel32.dll")] public static extern bool CloseHandle(IntPtr token);
+}
+'@
+foreach($kind in @(2,3)){
+ $token=[IntPtr]::Zero
+ $ok=[PilotNativeLogon]::Logon($match.Groups[1].Value,$env:COMPUTERNAME,$env:PILOT_OWNER_PASSWORD,$kind,0,[ref]$token)
+ $code=[Runtime.InteropServices.Marshal]::GetLastWin32Error()
+ if($token -ne [IntPtr]::Zero){[PilotNativeLogon]::CloseHandle($token)|Out-Null}
+ Write-Output ('PILOT_NATIVE_OWNER_LOGON='+(@{account=$match.Groups[1].Value;computerName=$env:COMPUTERNAME;type=$kind;ok=$ok;error=$(if($ok){0}else{$code})}|ConvertTo-Json -Compress))
+ if(-not $ok){throw ('Native owner authentication refused, logon type '+$kind+', Win32 '+$code)}
+}
 # Close standard WinRM firewall exceptions before starting/creating a listener.
 Get-NetFirewallRule -Name 'WINRM-*' -ErrorAction SilentlyContinue|Disable-NetFirewallRule -ErrorAction Stop|Out-Null
 $ruleName='WindowsHomePilot-Repair-WinRM'
@@ -51,18 +72,33 @@ $dir=Join-Path $env:ProgramData ('WindowsHomePilotRepair\'+$env:GITHUB_RUN_ID)
 if(Test-Path -LiteralPath $dir){throw 'Repair access directory must be new.'}
 New-Item -ItemType Directory -Path $dir -ErrorAction Stop|Out-Null
 $path=Join-Path $dir 'access.json'
-[ordered]@{schema=1;runId=$env:GITHUB_RUN_ID;hostname=('windows-home-pilot-'+$env:GITHUB_RUN_ID);ip=$policy.LocalAddress;port=5985;account=$match.Groups[1].Value;sourceSha=$env:GITHUB_SHA;workspace=$env:GITHUB_WORKSPACE;transport='ntlm-message-encrypted';nativeReadback=$true}|ConvertTo-Json -Compress|Set-Content -LiteralPath $path -Encoding utf8
+[ordered]@{schema=1;runId=$env:GITHUB_RUN_ID;hostname=('windows-home-pilot-'+$env:GITHUB_RUN_ID);ip=$policy.LocalAddress;port=5985;account=$match.Groups[1].Value;computerName=$env:COMPUTERNAME;sourceSha=$env:GITHUB_SHA;workspace=$env:GITHUB_WORKSPACE;transport='ntlm-message-encrypted';nativeReadback=$true}|ConvertTo-Json -Compress|Set-Content -LiteralPath $path -Encoding utf8
 Write-Output ('PILOT_REPAIR_ACCESS_CONFIGURED='+$policy.LocalAddress+':5985')
 # A separate tailnet client must authenticate and exercise this before guest download.
 
+}
+if($ConfigureOnly){return}
+$dir=Join-Path $env:ProgramData ('WindowsHomePilotRepair\'+$env:GITHUB_RUN_ID)
+$metadata=Get-Content -LiteralPath (Join-Path $dir 'access.json') -Raw|ConvertFrom-Json
+if($metadata.runId -cne $env:GITHUB_RUN_ID -or $metadata.sourceSha -cne $env:GITHUB_SHA){throw 'Bootstrap identity mismatch before wait.'}
 $ready=Join-Path $dir 'ready.json';$deadline=[DateTime]::UtcNow.AddMinutes(5);$verified=$false
 while([DateTime]::UtcNow -lt $deadline){
  if(Test-Path -LiteralPath $ready){
   $proof=Get-Content -LiteralPath $ready -Raw|ConvertFrom-Json
-  if($proof.schema -ne 1 -or $proof.runId -cne $env:GITHUB_RUN_ID -or $proof.sourceSha -cne $env:GITHUB_SHA -or $proof.account -cne $match.Groups[1].Value -or $proof.admin -ne $true){throw 'Independent repair access proof mismatch.'}
+  if($proof.schema -ne 1 -or $proof.runId -cne $env:GITHUB_RUN_ID -or $proof.sourceSha -cne $env:GITHUB_SHA -or $proof.account -cne $metadata.account -or $proof.admin -ne $true){throw 'Independent repair access proof mismatch.'}
   $verified=$true;break
  }
  Start-Sleep -Seconds 5
 }
-if(-not $verified){throw 'Independent authenticated repair client unavailable; expensive recovery forbidden.'}
+if(-not $verified){
+ try {
+  $events=@(Get-WinEvent -FilterHashtable @{LogName='Security';Id=4625;StartTime=[DateTime]::Now.AddMinutes(-12)} -MaxEvents 12 -ErrorAction Stop)
+  foreach($event in $events){
+   $xml=[xml]$event.ToXml();$fields=@{}
+   foreach($field in $xml.Event.EventData.Data){$fields[$field.Name]=[string]$field.'#text'}
+   if($fields['TargetUserName'] -ieq $metadata.account){Write-Output ('PILOT_OWNER_LOGON_FAILURE='+(@{status=$fields['Status'];subStatus=$fields['SubStatus'];logonType=$fields['LogonType'];authPackage=$fields['AuthenticationPackageName']}|ConvertTo-Json -Compress))}
+  }
+ } catch {Write-Output ('PILOT_OWNER_LOGON_EVENTS_UNAVAILABLE='+$_.Exception.GetType().Name)}
+ throw 'Independent authenticated repair client unavailable; expensive recovery forbidden.'
+}
 Write-Output 'PILOT_REPAIR_ACCESS_AUTHENTICATED=true'

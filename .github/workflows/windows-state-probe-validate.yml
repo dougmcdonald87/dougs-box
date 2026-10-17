@@ -432,15 +432,27 @@ jobs:
           if($LASTEXITCODE -ne 0){throw 'Pilot SID-based control directory ACL regression test failed; guest restore forbidden.'}
           python ./tests/windows-home-guest-owner.tests.py
           if($LASTEXITCODE -ne 0){throw 'Guest owner account security/sequence tests failed before restore.'}
-      - name: Establish independently authenticated repair access before expensive restore
+      - name: Configure and diagnose native owner authentication before restore
         shell: pwsh
+        env:
+          PILOT_OWNER_PASSWORD: ${{ secrets.DEVBOX_RDP_PASSWORD }}
         run: |
           $ErrorActionPreference='Stop'
           foreach($test in @('./tests/windows-home-session-budget.tests.ps1','./tests/windows-home-repair-access.tests.ps1','./tests/windows-state-repair-retention.tests.ps1','./tests/windows-state-repair-resume.tests.ps1','./tests/windows-home-guest-transport.tests.ps1','./tests/windows-home-guest-receipts.tests.ps1','./tests/windows-home-guest-batch.tests.ps1')){
             & pwsh -NoProfile -File $test
             if($LASTEXITCODE -ne 0){throw ('Repair guard failed: '+$test)}
           }
-          ./scripts/windows-home-repair-access.ps1
+          ./scripts/windows-home-repair-access.ps1 -ConfigureOnly
+      - name: Publish public bootstrap identity after native credential check
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: pilot-repair-bootstrap-${{ github.run_id }}
+          path: C:\ProgramData\WindowsHomePilotRepair\${{ github.run_id }}\access.json
+          retention-days: 1
+          if-no-files-found: error
+      - name: Require independently authenticated owner before guest acquisition
+        shell: pwsh
+        run: ./scripts/windows-home-repair-access.ps1 -WaitForClient
       - name: Prepare internal switch before interactive recovery
         shell: pwsh
         run: |
@@ -786,8 +798,9 @@ jobs:
     if: github.event_name == 'workflow_dispatch' && inputs.transfer_phase == 'restore-hold' && github.ref == 'refs/heads/pilot/windows-home-connection-20261015'
     runs-on: ubuntu-latest
     environment: devbox
-    timeout-minutes: 12
+    timeout-minutes: 20
     permissions:
+      actions: read
       contents: read
       id-token: write
     steps:
@@ -809,6 +822,7 @@ jobs:
       - name: Prove existing owner WinRM authentication before guest recovery
         shell: bash
         env:
+          GH_TOKEN: ${{ github.token }}
           PILOT_OWNER_PASSWORD: ${{ secrets.DEVBOX_RDP_PASSWORD }}
           PILOT_RSA_MODULUS: 'sAG02lyI4VmCrns0hn8SX/qBliFPYWpbcBW4lu6UBRqDxOlgPWwlSdnnCP1LZG9ShL9Cv10EgjdENZZb23JJ+lhu6R/K+FLS9raCpWLY5t/BGphCbbIszLAqMkROtsIyxP+HHE2fUxaZAseX6JjCMtRjw0/MStElH9oh+aCvIfQt7fUlDng+JU2DqjqswBUd/cT6EPMqQDDgIy8887ba4p/Eil+0vTzWRoUAs2JJcXV+P5w/DKiKoNS9uSMC6DeSVm0S6/5hfY1YijRuH1KR9ne3REB0EThwLvkb9le+IUoFdVokEsgOYw5bsO1CQIExHpQMPRj31k1uV1VHITAzHLdz/hAZmHVzqZ5c0eqLjFNENxvR8KdLhg4Cu5+hrBu8zH3QJ128EEfROlXOJoJ+RpcipHFfkr3fl3xErXHvTN2E/RLxpLgJ4WSZwkKO4m05CmLe8wKO3tDmlRskEL7nDQB/c+ahS+sqi50BVqjseJkIMgDX68y3Ka0XuE40+rYd'
         run: |
