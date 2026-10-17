@@ -41,12 +41,16 @@ if($clear.ReturnValue -eq 4096){
     Write-Host ('NATIVE_CLEAR_SNAPSHOT_JOB='+($job|Select-Object JobState,ErrorCode,ErrorDescription|ConvertTo-Json -Compress))
     if($job.JobState -ne 7 -or $job.ErrorCode -ne 0){throw 'Native snapshot state job failed.'}
 } elseif($clear.ReturnValue -ne 0){throw 'Native snapshot state method refused.'}
+$nativeAfter=Get-CimInstance -InputObject $settings[0] -ErrorAction Stop
+Write-Host ('NATIVE_SETTINGS_IMMEDIATELY_AFTER='+($nativeAfter|Select-Object ConfigurationID,VirtualSystemIdentifier,VirtualSystemType,IsSaved|ConvertTo-Json -Compress))
 $r=Compare-VM -CompatibilityReport $r -ErrorAction Stop
+$nativeCompared=Get-CimInstance -InputObject $settings[0] -ErrorAction Stop
+Write-Host ('NATIVE_SETTINGS_AFTER_COMPARE='+($nativeCompared|Select-Object ConfigurationID,VirtualSystemIdentifier,VirtualSystemType,IsSaved|ConvertTo-Json -Compress))
 $freshVm=Get-VM -Id $id -ErrorAction Stop
 $after=@(Get-VMSnapshot -VM $freshVm -ErrorAction Stop|Where-Object {$_.Id -eq $snapshots[0].Id})
 Write-Host ('NATIVE_PLANNED_CHECKPOINT_AFTER='+($after|Select-Object Id,VMId,Name,State|ConvertTo-Json -Compress))
 Write-Host ('NATIVE_MEMORY_FILES_AFTER='+(@(Get-ChildItem $root -Recurse -File -Filter *.vmrs|Select-Object FullName,Length)|ConvertTo-Json -Compress))
-if($after.Count -ne 1 -or $after[0].VMId -ne $id -or $after[0].State.ToString() -cne 'Off'){throw 'Native planned checkpoint memory removal unverified.'}
+if($after.Count -ne 1 -or $after[0].VMId -ne $id -or $nativeAfter.IsSaved -ne $false -or $nativeCompared.IsSaved -ne $false){throw 'Native planned checkpoint memory removal unverified.'}
 Write-Host 'NATIVE_PLANNED_CHECKPOINT_SAVED_MEMORY_REMOVAL_VERIFIED=true' 
 
 # Keep any preexisting nat switch untouched. Exercise the same native resolver
