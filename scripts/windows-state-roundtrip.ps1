@@ -216,3 +216,16 @@ function Restore-WindowsStateRoundtrip {
     }
 }
 
+
+# Native restore also emits setup/Hyper-V objects; strict callers must select by shape.
+function Get-WindowsStateFreshRestoreReceipt {
+    [CmdletBinding()]
+    param([AllowEmptyCollection()][AllowNull()][object[]]$Parts)
+    $receipts=@($Parts|Where-Object {
+        $_ -is [pscustomobject] -and
+        $null -ne $_.PSObject.Properties['freshHostRestored'] -and
+        $_.freshHostRestored -is [bool] -and $_.freshHostRestored -eq $true
+    })
+    if($receipts.Count -ne 1){throw 'Exactly one verified fresh-host restore receipt is required.'}
+    $receipts[0]
+}

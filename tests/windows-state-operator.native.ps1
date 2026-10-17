@@ -4,7 +4,7 @@ Set-StrictMode -Version Latest
 if($env:GITHUB_ACTIONS -cne 'true' -or $env:DEVBOX_ISOLATED_TEST -cne '1' -or $env:GITHUB_REF -cne 'refs/heads/pilot/windows-home-connection-20261015'){throw 'Native acceptance requires isolated pilot.'}
 . (Join-Path $PSScriptRoot '../scripts/windows-state-roundtrip.ps1')
 $parts=@(Restore-WindowsStateRoundtrip -ExpectedGeneration $env:EXPECTED_GENERATION -ExpectedSourceSha $env:EXPECTED_SOURCE_SHA -HoldForOperator)
-$results=@($parts|Where-Object {$_ -is [pscustomobject] -and $_.freshHostRestored -eq $true})
+$results=@(Get-WindowsStateFreshRestoreReceipt -Parts $parts)
 if($results.Count -ne 1){throw 'Native acceptance restore receipt missing.'}
 $vm=$results[0];$id=[guid]$vm.vmId
 $control=Join-Path $env:ProgramData ('WindowsHomePilot/'+$env:GITHUB_RUN_ID)

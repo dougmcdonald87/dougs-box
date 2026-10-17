@@ -402,6 +402,7 @@ jobs:
         run: |
           $ErrorActionPreference='Stop'
           ./tests/windows-state-source-parse.tests.ps1
+          ./tests/windows-state-restore-receipt.tests.ps1
           ./tests/windows-state-import-network.tests.ps1
           python ./tests/windows-home-rdp-receipt.tests.py
           if($LASTEXITCODE -ne 0){throw 'Pilot RDP receipt cross-step path tests failed; guest restore forbidden.'}
@@ -436,7 +437,7 @@ jobs:
             Start-Sleep -Seconds 600
             throw $failure
           }
-          $result=@($parts|Where-Object {$_ -is [pscustomobject] -and $_.freshHostRestored -eq $true}|Select-Object -First 1)
+          $result=@(Get-WindowsStateFreshRestoreReceipt -Parts $parts)
           if($result.Count -ne 1){throw 'Verified guest restore result missing or ambiguous.'}
           $vm=$result[0]
           ./scripts/windows-home-owner-account.ps1 -VmId ([guid]$vm.vmId) -Root $vm.root -OriginGeneration $vm.originGeneration
@@ -571,6 +572,7 @@ jobs:
         shell: pwsh
         run: |
           ./tests/windows-state-source-parse.tests.ps1
+          ./tests/windows-state-restore-receipt.tests.ps1
           python ./tests/windows-state-checkpoint.tests.py
           if ($LASTEXITCODE -ne 0) { throw 'Checkpoint manifest regression tests failed' }
           python ./tests/windows-state-transfer.tests.py
@@ -691,7 +693,7 @@ jobs:
           $ErrorActionPreference='Stop'
           . ./scripts/windows-state-roundtrip.ps1
           $parts=@(Restore-WindowsStateRoundtrip -ExpectedGeneration $env:EXPECTED_GENERATION -ExpectedSourceSha $env:EXPECTED_SOURCE_SHA -HoldForOperator)
-          $result=@($parts|Where-Object {$_ -is [pscustomobject] -and $_.freshHostRestored -eq $true})
+          $result=@(Get-WindowsStateFreshRestoreReceipt -Parts $parts)
           if($result.Count -ne 1){throw 'Verified restore result absent.'}
           Write-Host ('COLD_RESTORE_VERIFIED='+($result[0]|ConvertTo-Json -Depth 7 -Compress))
           $id=[guid]$result[0].vmId
@@ -728,6 +730,7 @@ jobs:
         shell: pwsh
         run: |
           ./tests/windows-state-source-parse.tests.ps1
+          ./tests/windows-state-restore-receipt.tests.ps1
           ./tests/windows-state-finish-order.tests.ps1
           ./tests/windows-state-import-network.tests.ps1
           ./tests/windows-state-planned-memory.tests.ps1
