@@ -25,7 +25,7 @@ on:
       transfer_phase:
         description: 'Isolated native probe, encrypted whole Windows producer, or independently fresh restore'
         type: choice
-        options: [cold-restore-verification, native-compatibility, probe, publish, restore, restore-hold, tailnet-preflight, transport-probe, operator, process-probe, artifact-probe, restricted-agent-probe, live-host-probe, restore-live-save-probe, owner-policy-tests, guest-network-probe]
+        options: [operator-acceptance, cold-restore-verification, native-compatibility, probe, publish, restore, restore-hold, tailnet-preflight, transport-probe, operator, process-probe, artifact-probe, restricted-agent-probe, live-host-probe, restore-live-save-probe, owner-policy-tests, guest-network-probe]
         default: probe
       transport_full_part:
         description: 'Use a full512MiB random non-user probe payload instead of32bytes'
@@ -705,3 +705,42 @@ jobs:
           } finally {Remove-PSSession $session}
           Stop-VM -VM (Get-VM -Id $id -ErrorAction Stop) -ErrorAction Stop
           if((Get-VM -Id $id -ErrorAction Stop).State -ne 'Off'){throw 'Verification guest shutdown unconfirmed.'}
+
+  operator-acceptance:
+    if: github.event_name == 'workflow_dispatch' && inputs.transfer_phase == 'operator-acceptance' && github.ref == 'refs/heads/pilot/windows-home-connection-20261015'
+    runs-on: windows-2025-vs2026
+    environment: devbox
+    timeout-minutes: 150
+    permissions:
+      contents: write
+    env:
+      DEVBOX_ISOLATED_TEST: '1'
+      GH_TOKEN: ${{ github.token }}
+      RESTIC_PASSWORD: ${{ secrets.RESTIC_PASSWORD }}
+      EXPECTED_GENERATION: ${{ inputs.expected_generation }}
+      EXPECTED_SOURCE_SHA: ${{ inputs.expected_source_sha }}
+      PILOT_RSA_MODULUS: 'sAG02lyI4VmCrns0hn8SX/qBliFPYWpbcBW4lu6UBRqDxOlgPWwlSdnnCP1LZG9ShL9Cv10EgjdENZZb23JJ+lhu6R/K+FLS9raCpWLY5t/BGphCbbIszLAqMkROtsIyxP+HHE2fUxaZAseX6JjCMtRjw0/MStElH9oh+aCvIfQt7fUlDng+JU2DqjqswBUd/cT6EPMqQDDgIy8887ba4p/Eil+0vTzWRoUAs2JJcXV+P5w/DKiKoNS9uSMC6DeSVm0S6/5hfY1YijRuH1KR9ne3REB0EThwLvkb9le+IUoFdVokEsgOYw5bsO1CQIExHpQMPRj31k1uV1VHITAzHLdz/hAZmHVzqZ5c0eqLjFNENxvR8KdLhg4Cu5+hrBu8zH3QJ128EEfROlXOJoJ+RpcipHFfkr3fl3xErXHvTN2E/RLxpLgJ4WSZwkKO4m05CmLe8wKO3tDmlRskEL7nDQB/c+ahS+sqi50BVqjseJkIMgDX68y3Ka0XuE40+rYd'
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - name: Check first-party operator regressions before real backup operations
+        shell: pwsh
+        run: |
+          ./tests/windows-state-source-parse.tests.ps1
+          ./tests/windows-state-finish-order.tests.ps1
+          ./tests/windows-state-import-network.tests.ps1
+          ./tests/windows-state-planned-memory.tests.ps1
+          node --test .github/actions/pilot-device/*.test.mjs
+          if($LASTEXITCODE -ne 0){throw 'First-party operator regression failed.'}
+      - name: Prepare isolated internal switch
+        shell: pwsh
+        run: |
+          $ErrorActionPreference='Stop'
+          $switches=@(Get-VMSwitch -Name 'nat' -ErrorAction SilentlyContinue)
+          if(-not $switches.Count){New-VMSwitch -Name 'nat' -SwitchType Internal -ErrorAction Stop|Out-Null}
+          $switches=@(Get-VMSwitch -Name 'nat' -ErrorAction Stop)
+          if($switches.Count -ne 1 -or $switches[0].SwitchType.ToString() -cne 'Internal'){throw 'Unexpected switch type.'}
+      - name: Test actual Save and Finish requests, publications and VM states
+        shell: pwsh
+        run: ./tests/windows-state-operator.native.ps1
