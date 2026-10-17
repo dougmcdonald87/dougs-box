@@ -35,6 +35,7 @@ if([string](Get-Item WSMan:\localhost\Service\AllowUnencrypted).Value -ine 'fals
 $rule=Get-NetFirewallRule -Name $ruleName -ErrorAction Stop
 $addresses=$rule|Get-NetFirewallAddressFilter -ErrorAction Stop
 $ports=$rule|Get-NetFirewallPortFilter -ErrorAction Stop
+Write-Output ('PILOT_REPAIR_FIREWALL_READBACK='+([ordered]@{enabled=[string]$rule.Enabled;action=[string]$rule.Action;localAddress=@($addresses.LocalAddress);remoteAddress=@($addresses.RemoteAddress);localPort=@($ports.LocalPort);protocol=[string]$ports.Protocol}|ConvertTo-Json -Compress))
 if($rule.Enabled.ToString() -cne 'True' -or $rule.Action.ToString() -cne 'Allow' -or @($addresses.LocalAddress).Count -ne 1 -or @($addresses.LocalAddress)[0] -cne $policy.LocalAddress -or @($addresses.RemoteAddress).Count -ne 1 -or @($addresses.RemoteAddress)[0] -cne $policy.RemoteAddress -or [string]$ports.LocalPort -cne '5985'){throw 'Repair firewall scope readback failed.'}
 $dir=Join-Path $env:ProgramData ('WindowsHomePilotRepair\'+$env:GITHUB_RUN_ID)
 if(Test-Path -LiteralPath $dir){throw 'Repair access directory must be new.'}
