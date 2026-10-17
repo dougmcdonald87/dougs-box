@@ -39,6 +39,11 @@ on:
         description: 'Pinned producer commit SHA for interactive recovery, not needed for original seed'
         type: string
         default: ''
+      inspection_mode:
+        description: 'Bounded evidence on the existing retained host'
+        type: choice
+        options: [disks, guest-evidence]
+        default: disks
       target_run:
         description: 'Exact retained pilot run for read-only live inspection'
         type: string
@@ -586,6 +591,7 @@ jobs:
       - name: Read native disk references on exact retained pilot without changing VM
         shell: bash
         env:
+          PILOT_INSPECTION_MODE: ${{ inputs.inspection_mode || 'disks' }}
           PILOT_TARGET_RUN_ID: ${{ inputs.target_run }}
           PILOT_TARGET_SHA: ${{ inputs.target_sha }}
           PILOT_OWNER_PASSWORD: ${{ secrets.DEVBOX_RDP_PASSWORD }}

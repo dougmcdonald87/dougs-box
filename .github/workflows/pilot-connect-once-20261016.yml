@@ -12,7 +12,7 @@ jobs:
     if: >-
       github.event_name == 'push' &&
       github.ref == 'refs/heads/pilot/windows-home-connection-20261015' &&
-      github.event.head_commit.message == 'fix(pilot): inspect both established owned VM layouts'
+      github.event.head_commit.message == 'diagnose(pilot): capture retained guest desktop evidence'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -31,6 +31,7 @@ jobs:
             --repo "$GH_REPO" \
             --ref 'pilot/windows-home-connection-20261015' \
             --field transfer_phase=live-host-probe \
+            --field inspection_mode=guest-evidence \
             --field target_run=39073421057 \
             --field target_sha=80c15845ddc73b294f4edeb5b9475d2284e1e929
           echo 'PILOT_ONE_SHOT_RDP_PROBE_DISPATCH_ACCEPTED=true'
