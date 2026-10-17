@@ -26,8 +26,14 @@ Write-Host 'NATIVE_MISSING_SWITCH_REPRODUCED=true'
 $snapshots=@(Get-VMSnapshot -VM $r.VM -ErrorAction Stop|Where-Object {$_.Name -ceq 'OwnedSavedMemoryProbe'})
 if($snapshots.Count -ne 1 -or $snapshots[0].VMId -ne $id -or $snapshots[0].State.ToString() -cne 'Saved'){throw 'Native planned saved-memory condition not reproduced.'}
 Write-Host ('NATIVE_PLANNED_CHECKPOINT_BEFORE='+($snapshots[0]|Select-Object Id,VMId,Name,State|ConvertTo-Json -Compress))
+$memoryBefore=@(Get-ChildItem $root -Recurse -File -Filter *.vmrs|Select-Object FullName,Length)
+Write-Host ('NATIVE_MEMORY_FILES_BEFORE='+($memoryBefore|ConvertTo-Json -Compress))
 Remove-VMSavedState -VMSnapshot $snapshots[0] -Confirm:$false -ErrorAction Stop
-$after=@(Get-VMSnapshot -VM $r.VM -ErrorAction Stop|Where-Object {$_.Id -eq $snapshots[0].Id})
+$r=Compare-VM -CompatibilityReport $r -ErrorAction Stop
+$freshVm=Get-VM -Id $id -ErrorAction Stop
+$after=@(Get-VMSnapshot -VM $freshVm -ErrorAction Stop|Where-Object {$_.Id -eq $snapshots[0].Id})
+Write-Host ('NATIVE_PLANNED_CHECKPOINT_AFTER='+($after|Select-Object Id,VMId,Name,State|ConvertTo-Json -Compress))
+Write-Host ('NATIVE_MEMORY_FILES_AFTER='+(@(Get-ChildItem $root -Recurse -File -Filter *.vmrs|Select-Object FullName,Length)|ConvertTo-Json -Compress))
 if($after.Count -ne 1 -or $after[0].VMId -ne $id -or $after[0].State.ToString() -cne 'Off'){throw 'Native planned checkpoint memory removal unverified.'}
 Write-Host 'NATIVE_PLANNED_CHECKPOINT_SAVED_MEMORY_REMOVAL_VERIFIED=true' 
 
