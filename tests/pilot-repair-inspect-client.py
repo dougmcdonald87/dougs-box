@@ -4,12 +4,26 @@ from pathlib import Path
 import winrm
 from cryptography.hazmat.primitives.asymmetric import rsa,padding
 from cryptography.hazmat.primitives import hashes
+def make_inspection_command(run,sha,source):
+    import hashlib
+    if not re.fullmatch('[1-9][0-9]*',run) or not re.fullmatch('[0-9a-f]{40}',sha):raise ValueError('Pinned inspection target required')
+    digest=hashlib.sha256(source.replace('\r\n','\n').encode()).hexdigest()
+    return f'''$ErrorActionPreference='Stop'
+$a=Get-Content -LiteralPath 'C:\\ProgramData\\WindowsHomePilotRepair\\{run}\\access.json' -Raw|ConvertFrom-Json
+if($a.runId -cne '{run}' -or $a.sourceSha -cne '{sha}'){{throw 'Target mismatch'}}
+$s=Get-Content -LiteralPath (Join-Path $a.workspace 'scripts/windows-home-repair-inspect.ps1') -Raw
+$s=$s.Replace("`r`n","`n")
+$hash=[BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash([Text.Encoding]::UTF8.GetBytes($s))).Replace('-','').ToLowerInvariant()
+if($hash -cne '{digest}'){{throw 'Read-only inspection source mismatch'}}
+&([scriptblock]::Create($s.Replace('__TARGET_RUN__','{run}').Replace('__TARGET_SHA__','{sha}')))
+'''
+
 run=os.environ.get('PILOT_TARGET_RUN_ID','');sha=os.environ.get('PILOT_TARGET_SHA','')
 if not re.fullmatch('[1-9][0-9]*',run) or not re.fullmatch('[0-9a-f]{40}',sha):raise SystemExit('Pinned pilot target required')
 req=urllib.request.Request('https://api.github.com/repos/dougmcdonald87/dougs-box/actions/runs/'+run,headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json'})
 with urllib.request.urlopen(req,timeout=20) as response:target=json.load(response)
 if target['head_sha']!=sha or target['head_branch']!='pilot/windows-home-connection-20261015' or target['event']!='workflow_dispatch' or target['path']!='.github/workflows/windows-state-probe-validate.yml' or target['status']!='in_progress':raise SystemExit('Target is not the exact live retained pilot')
-script=Path('scripts/windows-home-repair-inspect.ps1').read_text().replace('__TARGET_RUN__',run).replace('__TARGET_SHA__',sha)
+script=make_inspection_command(run,sha,Path('scripts/windows-home-repair-inspect.ps1').read_text())
 end=time.monotonic()+1200;result=None
 while time.monotonic()<end:
     peers=json.loads(subprocess.check_output(['tailscale','status','--json'])).get('Peer',{}).values()
