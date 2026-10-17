@@ -9,5 +9,12 @@ try {
  Write-Host ('PILOT_SCOPE_NATIVE_READBACK='+([ordered]@{enabled=$rule.Enabled.ToString();action=$rule.Action.ToString();localAddress=@($addresses.LocalAddress);remoteAddress=@($addresses.RemoteAddress);localPort=@($ports.LocalPort);protocol=[string]$ports.Protocol;localType=$addresses.LocalAddress.GetType().FullName;remoteType=$addresses.RemoteAddress.GetType().FullName;portType=$ports.LocalPort.GetType().FullName}|ConvertTo-Json -Compress))
  $matched=$rule.Enabled.ToString() -ceq 'True' -and $rule.Action.ToString() -ceq 'Allow' -and @($addresses.LocalAddress).Count -eq 1 -and @($addresses.LocalAddress)[0] -ceq '100.64.0.42' -and @($addresses.RemoteAddress).Count -eq 1 -and @($addresses.RemoteAddress)[0] -ceq '100.64.0.0/10' -and [string]$ports.LocalPort -ceq '5985'
  Write-Host ('PILOT_SCOPE_ORIGINAL_PREDICATE='+$matched)
- if(-not $matched){throw 'Exact old firewall predicate reproduced failure; inspect native readback before changing scope.'}
+ $t=$null;$e=$null;$ast=[System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot '../scripts/windows-home-repair-access.ps1'),[ref]$t,[ref]$e)
+ foreach($functionName in @('Get-WindowsHomeRepairAccessPolicy','Test-WindowsHomeRepairFirewallScope')){
+  $f=$ast.Find({param($n)$n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -ceq $functionName},$true)
+  if(-not $f){throw 'Native scope helper missing'};Invoke-Expression $f.Extent.Text
+ }
+ $fixed=Test-WindowsHomeRepairFirewallScope $rule $addresses $ports (Get-WindowsHomeRepairAccessPolicy '100.64.0.42')
+ Write-Host ('PILOT_SCOPE_CORRECTED_PREDICATE='+$fixed)
+ if(-not $fixed){throw 'Corrected exact native firewall scope still refused.'}
 } finally {Remove-NetFirewallRule -Name $name -ErrorAction SilentlyContinue}

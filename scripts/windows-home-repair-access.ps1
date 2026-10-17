@@ -10,6 +10,16 @@ function Get-WindowsHomeRepairAccessPolicy {
  if($bytes[0] -ne 100 -or $bytes[1] -lt 64 -or $bytes[1] -gt 127){throw 'Repair access requires the pilot tailnet address.'}
  [pscustomobject]@{LocalAddress=$PilotIp;RemoteAddress='100.64.0.0/10';LocalPort=5985;Basic=$false;AllowUnencrypted=$false}
 }
+function Test-WindowsHomeRepairFirewallScope {
+ param($Rule,$Addresses,$Ports,$Policy)
+ $local=@($Addresses.LocalAddress);$remote=@($Addresses.RemoteAddress);$port=@($Ports.LocalPort)
+ # Get-NetFirewallAddressFilter natively renders /10 as this exact dotted mask.
+ $equivalentRemote=@('100.64.0.0/10','100.64.0.0/255.192.0.0')
+ return $Policy.RemoteAddress -ceq '100.64.0.0/10' -and $Rule.Enabled.ToString() -ceq 'True' -and
+  $Rule.Action.ToString() -ceq 'Allow' -and $local.Count -eq 1 -and $local[0] -ceq $Policy.LocalAddress -and
+  $remote.Count -eq 1 -and $remote[0] -cin $equivalentRemote -and $port.Count -eq 1 -and $port[0] -ceq '5985' -and
+  $Ports.Protocol.ToString() -cin @('TCP','6')
+}
 if($env:GITHUB_ACTIONS -cne 'true' -or $env:DEVBOX_ISOLATED_TEST -cne '1' -or $env:GITHUB_EVENT_NAME -cne 'workflow_dispatch' -or $env:GITHUB_REPOSITORY -cne 'dougmcdonald87/dougs-box' -or $env:GITHUB_REF -cne 'refs/heads/pilot/windows-home-connection-20261015'){throw 'Repair access is restricted to the isolated manual pilot.'}
 $ips=@(& tailscale ip -4)
 if($LASTEXITCODE -ne 0 -or $ips.Count -ne 1){throw 'Exactly one connected pilot tailnet address required.'}
@@ -36,7 +46,7 @@ $rule=Get-NetFirewallRule -Name $ruleName -ErrorAction Stop
 $addresses=$rule|Get-NetFirewallAddressFilter -ErrorAction Stop
 $ports=$rule|Get-NetFirewallPortFilter -ErrorAction Stop
 Write-Output ('PILOT_REPAIR_FIREWALL_READBACK='+([ordered]@{enabled=[string]$rule.Enabled;action=[string]$rule.Action;localAddress=@($addresses.LocalAddress);remoteAddress=@($addresses.RemoteAddress);localPort=@($ports.LocalPort);protocol=[string]$ports.Protocol}|ConvertTo-Json -Compress))
-if($rule.Enabled.ToString() -cne 'True' -or $rule.Action.ToString() -cne 'Allow' -or @($addresses.LocalAddress).Count -ne 1 -or @($addresses.LocalAddress)[0] -cne $policy.LocalAddress -or @($addresses.RemoteAddress).Count -ne 1 -or @($addresses.RemoteAddress)[0] -cne $policy.RemoteAddress -or [string]$ports.LocalPort -cne '5985'){throw 'Repair firewall scope readback failed.'}
+if(-not(Test-WindowsHomeRepairFirewallScope -Rule $rule -Addresses $addresses -Ports $ports -Policy $policy)){throw 'Repair firewall scope readback failed.'}
 $dir=Join-Path $env:ProgramData ('WindowsHomePilotRepair\'+$env:GITHUB_RUN_ID)
 if(Test-Path -LiteralPath $dir){throw 'Repair access directory must be new.'}
 New-Item -ItemType Directory -Path $dir -ErrorAction Stop|Out-Null

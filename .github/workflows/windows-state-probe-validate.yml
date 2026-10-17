@@ -810,6 +810,7 @@ jobs:
         shell: bash
         env:
           PILOT_OWNER_PASSWORD: ${{ secrets.DEVBOX_RDP_PASSWORD }}
+          PILOT_RSA_MODULUS: 'sAG02lyI4VmCrns0hn8SX/qBliFPYWpbcBW4lu6UBRqDxOlgPWwlSdnnCP1LZG9ShL9Cv10EgjdENZZb23JJ+lhu6R/K+FLS9raCpWLY5t/BGphCbbIszLAqMkROtsIyxP+HHE2fUxaZAseX6JjCMtRjw0/MStElH9oh+aCvIfQt7fUlDng+JU2DqjqswBUd/cT6EPMqQDDgIy8887ba4p/Eil+0vTzWRoUAs2JJcXV+P5w/DKiKoNS9uSMC6DeSVm0S6/5hfY1YijRuH1KR9ne3REB0EThwLvkb9le+IUoFdVokEsgOYw5bsO1CQIExHpQMPRj31k1uV1VHITAzHLdz/hAZmHVzqZ5c0eqLjFNENxvR8KdLhg4Cu5+hrBu8zH3QJ128EEfROlXOJoJ+RpcipHFfkr3fl3xErXHvTN2E/RLxpLgJ4WSZwkKO4m05CmLe8wKO3tDmlRskEL7nDQB/c+ahS+sqi50BVqjseJkIMgDX68y3Ka0XuE40+rYd'
         run: |
           set -euo pipefail
           python3 -m venv "$RUNNER_TEMP/pilot-repair-client"
