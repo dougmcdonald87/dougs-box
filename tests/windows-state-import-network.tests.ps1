@@ -61,4 +61,13 @@ if($script:connections -ne 1 -or $script:comparisons -ne 1){throw 'ASSERT: plann
 Reset-Case;$r=New-Report;$r.Incompatibilities[0].Source.SwitchName='';$r.Incompatibilities[0].Message="Could not find Ethernet switch 'nat'.";$actual=Resolve-Test $r
 if($script:connections -ne 1 -or $script:comparisons -ne 1){throw 'ASSERT: native blank switch source refused'}
 Reset-Case;$r=New-Report;$r.Incompatibilities[0].Source.SwitchName='';$r.Incompatibilities[0].Message="Could not find Ethernet switch 'foreign'.";Assert-Refused $r
+# Real native retry39065587684 reported feature-mask mismatch on the same owned snapshot.
+Reset-Case;$r=New-Report;$r.Incompatibilities=@(New-SnapshotIssue);$r.Incompatibilities[0].MessageId=24004;$actual=Resolve-Test $r
+if($script:stateRemovals -ne 1 -or $script:connections -or $script:comparisons -ne 1){throw 'ASSERT: native24004 historical checkpoint not cleared/rechecked'}
+Reset-Case;$r=New-Report;$cpu=New-SnapshotIssue;$cpu.MessageId=24004;$r.Incompatibilities+=$cpu;$actual=Resolve-Test $r
+if($script:stateRemovals -ne 1 -or $script:connections -ne 1 -or $script:comparisons -ne 1){throw 'ASSERT: native24004 mixed with exact nat not resolved'}
+Reset-Case;$r=New-Report;$r.Incompatibilities=@(New-SnapshotIssue);$r.Incompatibilities[0].MessageId=24004;$r.Incompatibilities[0].Source.VMId=[guid]::NewGuid();Assert-Refused $r
+Reset-Case;$r=New-Report;$r.Incompatibilities=@(New-SnapshotIssue);$r.Incompatibilities[0].MessageId=24004;$r.Incompatibilities[0].Source.PSObject.TypeNames.Clear();Assert-Refused $r
+Reset-Case;$r=New-Report;$r.Incompatibilities=@(New-SnapshotIssue);$r.Incompatibilities[0].MessageId=24004;$r.Incompatibilities[0].Source.Id=$id;Assert-Refused $r
+Reset-Case;$r=New-Report;$r.Incompatibilities=@(New-SnapshotIssue);$r.Incompatibilities[0].MessageId=24004;$r.Incompatibilities+=([pscustomobject]@{MessageId=24005;Source=$r.Incompatibilities[0].Source});Assert-Refused $r
 Write-Output ('IMPORT NETWORK + HISTORICAL CPU STATE AND FOREIGN IDENTITY REFUSALS: PASS ('+$script:caseCount+' cases)')

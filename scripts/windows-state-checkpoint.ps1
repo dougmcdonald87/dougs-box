@@ -161,7 +161,8 @@ function Resolve-WindowsStateImportCompatibility {
                     throw 'Unexpected missing-switch source refused.'
                 }
             }
-            24002 {
+            {$_ -in @(24002,24004)} {
+                # Native vendor or feature mismatch in historical saved RAM; same exact planned-snapshot guard.
                 if($issue.Source.PSObject.TypeNames -notcontains 'Microsoft.HyperV.PowerShell.VMSnapshot' -or [guid]$issue.Source.Id -eq [guid]::Empty -or [guid]$issue.Source.Id -eq $ExpectedVmId){
                     throw 'Only an owned historical checkpoint CPU state may be cleared.'
                 }
@@ -170,7 +171,7 @@ function Resolve-WindowsStateImportCompatibility {
         }
     }
     $networkIssues=@($issues|Where-Object {$_.MessageId -eq 33012})
-    $cpuIssues=@($issues|Where-Object {$_.MessageId -eq 24002})
+    $cpuIssues=@($issues|Where-Object {$_.MessageId -in @(24002,24004)})
     $targets=@()
     if($networkIssues.Count){
         $targets=@(Get-VMSwitch -Name 'nat' -ErrorAction Stop)
