@@ -1,84 +1,46 @@
-# DevBox
+# DevBox Universal Continuity Kit v2
+**Read this first.** This is a portable, PUBLIC-SAFE, self-contained handoff archive for ChatGPT chat/Work, OpenCode V2 CLI, and other coding agents. It is NOT a deployed DevBox, a credential bundle, or proof of persistent Windows recovery.
 
-A repeatable, zero-cost, GitHub-hosted Windows development and debugging
-workstation. One Windows session at a time, via RDP over Tailscale, state-safe
-against the platform's six-hour limit.
+## Five-minute start
+1. Download this branch as a ZIP; extract to a working directory. Do not merge this documentation-only branch into main or pilot: its Git tree intentionally contains only the kit.
+2. In ChatGPT chat or Work: upload the ZIP, ask the agent to read AGENTS.md and prompts/CHATGPT_RESUME.md, and authorize specific connected apps as needed. Uploading a ZIP does not automatically connect apps or computers.
+3. In OpenCode V2: open the extracted directory as the workspace, read AGENTS.md, load the devbox-continuity skill from .opencode/skills, and use prompts/OPENCODE_RESUME.md. Use a separate checkout of the real source repo for code edits.
+4. Configure Remote Desktop Commander only when required. See references/CONNECT.md and examples/opencode.v2.jsonc. Complete OAuth separately per client.
+5. Before any action: refresh live GitHub branch SHA, Actions status, Desktop Commander device list and target identity. Never start a new runner to learn what an old runner did.
 
-Standard public Windows Actions runner (4 vCPU / 16 GB) -
->=100 GiB runtime-probed workspace -
-Tailscale as the only network-security layer -
-**[restic](https://github.com/restic/restic)/rest-server persistence on your own
-hardware** -
-**[OpenCode](https://opencode.ai)** on the box -
-manual, audited, honest.
+## Truth order
+Live read-only observation (GitHub Actions/API or authenticated machine) > immutable commit/run logs > checked-in docs > local event ledger > old ZIP/checkpoint > chat memory. Conflicts are BLOCKERS, not invitations to guess.
 
-## The laws that decide every code review
+## What is included
+- AGENTS.md: compact universal instructions.
+- .opencode/skills/devbox-continuity/SKILL.md: OpenCode V2-compatible skill.
+- references/: machine identity, connections, safety, anti-loop rules, specialist skill routing, acceptance plan.
+- state/: historical evidence snapshot, schema and decisions; not a live control plane.
+- scripts/continuity.py: offline-first event recording and preflight; standard library only.
+- tests/: unit tests for the ledger, to run locally after extraction.
+- examples/: optional V2 MCP/permissions configuration; never overwrite an existing config without review.
+- prompts/: precise handoffs for both clients.
 
-1. **Tailscale only.** No TLS stack, no reverse proxy, no second VPN, no
-   rest-server auth middleware. Windows login and the restic password stay because
-   their applications need them.
-2. **Zero spend.** Standard public runner only. Cache at 10 GB. No paid storage or
-   artifacts. Budgets set by hand in GitHub's UI.
-3. **Never assume D:.** Probe every fixed writable volume, binary GiB, loud
-   failure when nothing qualifies.
-4. **Append-only storage.** The DevBox backs up; deletion vocabulary does not
-   exist in this codebase. Retention is the owner's later manual move at the host.
-5. **Never false READY.** A failing mandatory health check prints
-   `DEVBOX FAILED` with the exact next action.
+## Verification status
+The files were authored from GitHub and official OpenCode V2 / Desktop Commander documentation on 2026-10-18. This archive does NOT contain the prior private CP155 ZIP and does NOT claim to have inspected it. Offline Desktop Commander devices prevented a live machine check. Python tests are supplied, but were not executed by the packaging environment; run them before trusting the script.
 
-## Repository map
+## Start commands
+From the extracted kit root:
+    python -m unittest discover -s tests -v
+    python scripts/continuity.py doctor
+    python scripts/continuity.py last
 
-```text
-.github/workflows/devbox.yml        session boot (manual)
-.github/workflows/validate.yml      static gates per push
-.github/workflows/probe-runners.yml capacity facts, manual
-scripts/                            11 runner-side scripts
-storage-host/                       7 storage-side scripts
-config/                             *.example.json (no secrets, ever)
-security/                           Tailscale grants fragment
-tests/                              Pester 5 static-logic suite
-docs/                               RESEARCH / ARCHITECTURE / OPERATING-MODES /
-                                    STORAGE / BACKUP-RECOVERY / RDP-LICENSING-NOTE /
-                                    TROUBLESHOOTING / ZERO-COST-CHECK / FIRST-RUN
-```
+To log a verified step from an extracted, non-Git checkout (NOT a live acceptance):
+    python scripts/continuity.py checkpoint --target pilot --offline --summary "Read-only inventory" --evidence "https://github.com/dougmcdonald87/dougs-box/actions" --next "Reconcile live run status"
 
-## Save / Finish controls and optional iPhone launcher
+Never treat a locally logged event as a published or verified Windows backup. Read references/ACCEPTANCE.md for actual success gates.
 
-For any **new** DevBox session started after deployment of this feature,
-the Windows Public Desktop contains `Save DevBox State Now` and
-`Finish DevBox Safely`. The latter requests and verifies a fresh Lenovo
-Restic snapshot **before** the normal GitHub job voluntarily exits.
-If verification fails, the requested stop is refused. GitHub timeouts and
-unexpected cancellations remain outside this guarantee.
+## Sources
+- Pilot repo: https://github.com/dougmcdonald87/dougs-box
+- OpenCode V2 instructions: https://dev.opencode.ai/v2/docs/instructions/
+- OpenCode V2 skills: https://dev.opencode.ai/v2/docs/skills/
+- OpenCode V2 MCP: https://dev.opencode.ai/v2/docs/mcp-servers/
+- OpenCode V2 permissions: https://dev.opencode.ai/v2/docs/permissions/
+- Desktop Commander Remote: https://github.com/desktop-commander/remote-desktop-commander
 
-See [iPhone starter and verified-stop setup](docs/IPHONE_START_VERIFIED_STOP.md)
-and the [adversarial evidence ledger](docs/CONTROL_ADVERSARIAL_EVIDENCE_2026-10-11.md)
-for status, setup, residual risks and test links. A fully configured one-tap
-iPhone Shortcut is **not** shipped or activated: the owner must set it up
-and test it, with a repo-scoped GitHub token. No automatic six-hour relaunch.
-
-## Fast start
-
-Skim `docs/FIRST-RUN.md` for the one-time UI setup (13 numbered clicks) and the
-every-session loop. Sessions run from the Actions tab; work happens after
-`DEVBOX READY`, over RDP inside the tailnet; every important milestone calls
-`Save DevBox State Now`; the day ends with `Finish DevBox Safely`, not Cancel.
-
-## What to read next
-
-| If you want... | Read |
-|---|---|
-| the why behind every phase | `docs/ARCHITECTURE.md` |
-| where each fact came from | `docs/RESEARCH.md` + `docs/SOURCE-REGISTER.md` folded from the skill pack |
-| cost accounting honesty | `docs/OPERATING-MODES.md` |
-| storage and repository design | `docs/STORAGE.md` |
-| recovery expectations | `docs/BACKUP-RECOVERY.md` |
-| RDP legality boundaries | `docs/RDP-LICENSING-NOTE.md` |
-| when something breaks | `docs/TROUBLESHOOTING.md` |
-
-## Honest limits
-
-No design guarantees: GitHub keeps D:, runner specs never change, Actions terms
-never change, licensing wording never changes, or that a Cancel cannot outpace a
-final save. This repo handles those facts by probing, by periodic snapshots, by
-hard budgets, and by refusing to declare success that has not happened yet.
+**Security:** The GitHub repository hosting this archive is PUBLIC. Never put private machine identifiers, account tokens, recovery material, credential files, customer data or private CP155 attachments into this branch or its ZIP.

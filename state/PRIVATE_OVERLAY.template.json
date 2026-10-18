@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "note": "PRIVATE local file only; do not commit or upload",
+  "machines": [
+    {
+      "alias": "personal-windows-A",
+      "desktop_commander_device_id": "FILL_FROM_LIVE_LIST",
+      "verified_hostname": "FILL_LOCALLY",
+      "role": "owner-confirmed"
+    },
+    {
+      "alias": "personal-windows-B",
+      "desktop_commander_device_id": "FILL_FROM_LIVE_LIST",
+      "verified_hostname": "FILL_LOCALLY",
+      "role": "owner-confirmed"
+    }
+  ],
+  "secrets": "NEVER STORE HERE"
+}

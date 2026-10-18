@@ -1,4 +1,0 @@
-name: Isolated mid-step artifact diagnostic
-runs:
-  using: node24
-  main: index.mjs

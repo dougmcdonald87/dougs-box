@@ -1,0 +1,58 @@
+{
+  "schema_version": 2,
+  "kind": "historical-observation-not-live",
+  "observed_date_utc": "2026-10-18",
+  "project": "Windows 10 Home pilot persistence and remote usability",
+  "repo": "dougmcdonald87/dougs-box",
+  "original": {
+    "branch": "main",
+    "workflow": ".github/workflows/devbox.yml",
+    "write_policy": "do-not-touch"
+  },
+  "pilot": {
+    "branch": "pilot/windows-home-connection-20261015",
+    "head_observed": "c34dfca8eac0509c536b70e7831ced55e179e8f9",
+    "workflow": ".github/workflows/windows-state-probe-validate.yml",
+    "write_policy": "approval-required"
+  },
+  "observed_runs": [
+    {
+      "id": 39073421057,
+      "head_sha": "80c15845ddc73b294f4edeb5b9475d2284e1e929",
+      "status_observed": "in_progress",
+      "conclusion": null,
+      "needs_refresh": true
+    },
+    {
+      "id": 39075326572,
+      "head_sha": "c34dfca8eac0509c536b70e7831ced55e179e8f9",
+      "status_observed": "completed",
+      "conclusion": "success",
+      "scope": "workflow guard; not full guest acceptance"
+    }
+  ],
+  "desktop_commander": {
+    "devices_observed": 6,
+    "online_observed": 0,
+    "identifiers_published": false,
+    "needs_refresh": true
+  },
+  "last_prior_private_checkpoint": {
+    "label": "CP155",
+    "source": "prior chat summary",
+    "verified_against_archive": false
+  },
+  "acceptance": {
+    "pilot_oidc_preflight": "historical_pass",
+    "same_host_save_finish": "historical_pass",
+    "fresh_outer_host_guest_boot": "not_verified_here",
+    "guest_gui_remote_reconnect": "not_verified_here"
+  },
+  "next": "Refresh pilot branch HEAD and Actions run 39073421057 status/jobs before any mutation",
+  "warnings": [
+    "Do not dispatch a duplicate active run",
+    "Do not confuse outer host with guest",
+    "Do not treat successful guard workflow as Windows acceptance",
+    "No private archive imported"
+  ]
+}
