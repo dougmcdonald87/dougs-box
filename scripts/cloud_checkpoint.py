@@ -192,7 +192,16 @@ class GitHubRemote:
         self.drafts={}
     def call(self,*args):
         result=subprocess.run(['gh',*args,'--repo',self.repository],capture_output=True,text=True,timeout=300)
-        if result.returncode:raise CheckpointError('GitHub transport operation failed')
+        if result.returncode:
+            stage=' '.join(args[:2]) if tuple(args[:2]) in (('release','create'),('release','view'),('release','upload'),('release','edit')) else 'command'
+            status=re.search(r'\bHTTP\s+([1-5][0-9]{2})\b',result.stderr or '')
+            detail=('; HTTP '+status.group(1)) if status else ''
+            error=result.stderr or ''
+            if 'Resource not accessible by integration' in error:detail+='; integration permission'
+            elif 'workflow' in error.lower() and 'refusing' in error.lower():detail+='; workflow permission'
+            elif 'Unknown JSON field' in error:detail+='; unsupported JSON field'
+            elif 'unknown flag' in error:detail+='; unsupported CLI option'
+            raise CheckpointError('GitHub transport operation failed ('+stage+'; exit '+str(result.returncode)+detail+')')
         return result.stdout
     def create_draft(self,tag):
         revision=os.environ.get('GITHUB_SHA')
