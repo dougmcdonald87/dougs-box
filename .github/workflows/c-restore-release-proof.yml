@@ -1,0 +1,61 @@
+name: C restore retained release feasibility
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/c-restore-release-proof.yml'
+permissions:
+  contents: read
+jobs:
+  capture:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: write
+    runs-on: windows-2025
+    timeout-minutes: 8
+    outputs:
+      sha256: ${{ steps.capture.outputs.sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - id: capture
+        shell: pwsh
+        run: ./tests/c-restore-cloud.spike.ps1 -Mode Capture -Archive "$env:RUNNER_TEMP/c-state.zip"
+      - name: Publish tiny synthetic development fixture as prerelease asset
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PROBE_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $archive = Join-Path $env:RUNNER_TEMP 'c-state.zip'
+          if ((Get-Item -LiteralPath $archive).Length -gt 1MB) { throw 'Synthetic fixture exceeded fixed 1MiB test limit.' }
+          $tag = "devbox-c-restore-probe-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          gh release create $tag $archive --repo $env:GITHUB_REPOSITORY --target $env:PROBE_HEAD --prerelease --latest=false --title 'DevBox C restore synthetic development fixture' --notes 'Disposable software-development restore experiment. Synthetic settings, SQLite and registry fixture only. No user data, credentials or whole-PC image. Not production backup.'
+          if ($LASTEXITCODE -ne 0) { throw 'Release asset upload failed.' }
+          Write-Host "RETAINED TEST ASSET: https://github.com/$env:GITHUB_REPOSITORY/releases/tag/$tag"
+  restore:
+    needs: capture
+    runs-on: windows-2025
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Fetch retained release asset with fresh job token
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = "devbox-c-restore-probe-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          $destination = Join-Path $env:RUNNER_TEMP 'release-fetch'
+          gh release download $tag --repo $env:GITHUB_REPOSITORY --pattern 'c-state.zip' --dir $destination
+          if ($LASTEXITCODE -ne 0) { throw 'Release asset download failed.' }
+      - name: Restore C state from retained release on fresh Windows VM
+        shell: pwsh
+        env:
+          EXPECTED_SHA256: ${{ needs.capture.outputs.sha256 }}
+        run: ./tests/c-restore-cloud.spike.ps1 -Mode Restore -Archive "$env:RUNNER_TEMP/release-fetch/c-state.zip" -ExpectedSha256 $env:EXPECTED_SHA256

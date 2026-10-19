@@ -1,0 +1,114 @@
+name: C restore encrypted release feasibility
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/c-restore-encrypted-proof.yml'
+permissions:
+  contents: read
+jobs:
+  capture:
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    environment: devbox
+    permissions:
+      contents: write
+    runs-on: windows-2025
+    timeout-minutes: 10
+    outputs:
+      sha256: ${{ steps.capture.outputs.sha256 }}
+      encrypted_sha256: ${{ steps.encrypt.outputs.encrypted_sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - id: capture
+        shell: pwsh
+        run: ./tests/c-restore-cloud.spike.ps1 -Mode Capture -Archive "$env:RUNNER_TEMP/c-state.zip"
+      - id: encrypt
+        name: Encrypt synthetic checkpoint with existing environment backup secret
+        shell: pwsh
+        env:
+          RESTIC_PASSWORD: ${{ secrets.RESTIC_PASSWORD }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([string]::IsNullOrWhiteSpace($env:RESTIC_PASSWORD)) { throw 'Existing devbox backup secret unavailable; no plaintext upload permitted.' }
+          $env:DEVBOX_WSROOT = Join-Path $env:RUNNER_TEMP 'encrypted-proof-tools'
+          $tools = Join-Path $env:DEVBOX_WSROOT 'restic'
+          ./scripts/install-restic.ps1 -ToolsRoot $tools
+          $exe = Join-Path $tools 'restic.exe'
+          $repo = Join-Path $env:RUNNER_TEMP 'synthetic-encrypted-repo'
+          & $exe --repo $repo init
+          if ($LASTEXITCODE -ne 0) { throw 'Isolated encrypted repository initialization failed.' }
+          & $exe --repo $repo backup (Join-Path $env:RUNNER_TEMP 'c-state.zip')
+          if ($LASTEXITCODE -ne 0) { throw 'Encrypted snapshot failed.' }
+          & $exe --repo $repo check --read-data
+          if ($LASTEXITCODE -ne 0) { throw 'Encrypted repository verification failed.' }
+          $encrypted = Join-Path $env:RUNNER_TEMP 'c-state.encrypted.zip'
+          [IO.Compression.ZipFile]::CreateFromDirectory($repo,$encrypted)
+          if ((Get-Item -LiteralPath $encrypted).Length -gt 10MB) { throw 'Encrypted fixture exceeded fixed 10MiB test limit.' }
+          $hash = (Get-FileHash -LiteralPath $encrypted -Algorithm SHA256).Hash.ToLowerInvariant()
+          "encrypted_sha256=$hash" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "ENCRYPTED CHECKPOINT VERIFIED: SHA256 $hash; secret value never printed."
+      - name: Publish encrypted synthetic development checkpoint only
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PROBE_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          $tag = "devbox-c-encrypted-probe-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          gh release create $tag "$env:RUNNER_TEMP/c-state.encrypted.zip" --repo $env:GITHUB_REPOSITORY --target $env:PROBE_HEAD --prerelease --latest=false --title 'DevBox encrypted synthetic development restore fixture' --notes 'Encrypted bounded software-development restore experiment. Synthetic fixture only, not real user data. No plaintext payload or secret value published. Not production backup.'
+          if ($LASTEXITCODE -ne 0) { throw 'Encrypted release upload failed.' }
+          Write-Host "ENCRYPTED TEST ASSET: https://github.com/$env:GITHUB_REPOSITORY/releases/tag/$tag"
+  restore:
+    needs: capture
+    environment: devbox
+    runs-on: windows-2025
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Fetch encrypted retained checkpoint
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "devbox-c-encrypted-probe-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          gh release download $tag --repo $env:GITHUB_REPOSITORY --pattern 'c-state.encrypted.zip' --dir "$env:RUNNER_TEMP/encrypted-fetch"
+          if ($LASTEXITCODE -ne 0) { throw 'Encrypted asset fetch failed.' }
+      - name: Reject wrong key, verify repository, decrypt then restore C state
+        shell: pwsh
+        env:
+          RESTIC_PASSWORD: ${{ secrets.RESTIC_PASSWORD }}
+          EXPECTED_ENCRYPTED_SHA256: ${{ needs.capture.outputs.encrypted_sha256 }}
+          EXPECTED_SHA256: ${{ needs.capture.outputs.sha256 }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          if ([string]::IsNullOrWhiteSpace($env:RESTIC_PASSWORD)) { throw 'Existing backup secret unavailable on fresh restore job.' }
+          $encrypted = Join-Path $env:RUNNER_TEMP 'encrypted-fetch/c-state.encrypted.zip'
+          $hash = (Get-FileHash -LiteralPath $encrypted -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($hash -cne $env:EXPECTED_ENCRYPTED_SHA256) { throw 'Encrypted cloud payload checksum mismatch.' }
+          $repo = Join-Path $env:RUNNER_TEMP 'fetched-encrypted-repo'
+          Expand-Archive -LiteralPath $encrypted -DestinationPath $repo
+          $env:DEVBOX_WSROOT = Join-Path $env:RUNNER_TEMP 'encrypted-proof-tools'
+          $tools = Join-Path $env:DEVBOX_WSROOT 'restic'
+          ./scripts/install-restic.ps1 -ToolsRoot $tools
+          $exe = Join-Path $tools 'restic.exe'
+          $correctPassword = $env:RESTIC_PASSWORD
+          try {
+            $env:RESTIC_PASSWORD = 'deliberately-wrong-disposable-probe-password'
+            & $exe --repo $repo cat config 2>$null | Out-Null
+            if ($LASTEXITCODE -eq 0) { throw 'Wrong key unexpectedly decrypted cloud checkpoint.' }
+            Write-Host 'ATTACK PASS: wrong key refused before C restoration.'
+          } finally { $env:RESTIC_PASSWORD = $correctPassword; $correctPassword = $null }
+          & $exe --repo $repo check --read-data
+          if ($LASTEXITCODE -ne 0) { throw 'Fetched encrypted snapshot integrity failed.' }
+          $recovered = Join-Path $env:RUNNER_TEMP 'decrypted-state'
+          & $exe --repo $repo restore latest --target $recovered
+          if ($LASTEXITCODE -ne 0) { throw 'Cloud checkpoint decryption/restore failed.' }
+          $archive = @(Get-ChildItem -LiteralPath $recovered -Recurse -File -Filter 'c-state.zip')
+          if ($archive.Count -ne 1) { throw 'Missing or ambiguous decrypted checkpoint.' }
+          ./tests/c-restore-cloud.spike.ps1 -Mode Restore -Archive $archive[0].FullName -ExpectedSha256 $env:EXPECTED_SHA256
+          Write-Host 'ENCRYPTED CLOUD RESTORE PASS: existing environment key, retained GitHub asset, independent Windows C fixture, no Lenovo.'
